@@ -3,6 +3,8 @@ name = "track-glow"
 version = "0.1.0"
 description = "Sync your home lights with the flag in a live race"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     { name = "Ryan Goodwin", email = "goodwinryan2@gmail.com" }
 ]

@@ -170,3 +170,7 @@ once, or Gatekeeper refuses to open it.
 Milestone 7: WLED output (spanned, synced, with web preview), lap progress bar, web setup and
 controls with a settings file, Home Assistant scenes, and Docker / PyInstaller packaging. Not yet
 validated on real WLED hardware.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
