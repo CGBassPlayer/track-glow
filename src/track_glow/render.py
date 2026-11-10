@@ -5,6 +5,7 @@ Rgb = tuple[int, int, int]
 WHITE: Rgb = (0xFF, 0xFF, 0xFF)
 OFF: Rgb = (0, 0, 0)
 OFFLINE: Rgb = (0x40, 0x18, 0x00)
+BAR_TRACK: Rgb = (0x10, 0x10, 0x10)
 
 LED_COLORS: dict[Flag, Rgb] = {
     Flag.GREEN: (0x00, 0xFF, 0x00),
@@ -39,3 +40,26 @@ def flag_frame(flag: Flag, n: int, elapsed: float) -> bytes:
     if elapsed < FLASH_SECONDS:
         return blocks(n, color, OFF, phase)
     return solid(n, color)
+
+
+def progress_bar(length: int, fraction: float, color: Rgb, track: Rgb = BAR_TRACK) -> bytes:
+    filled = min(max(fraction, 0.0), 1.0) * length
+    full = int(filled)
+    out = bytes(color) * full
+    if full < length:
+        t = filled % 1
+        out += bytes(int(tc + (c - tc) * t) for c, tc in zip(color, track, strict=True))
+        out += bytes(track) * (length - full - 1)
+    return out
+
+
+def bar_fraction(flag: Flag | None, lap: int | None, laps_in_race: int | None) -> float:
+    if flag is Flag.CHECKERED:
+        return 1.0
+    if not lap or not laps_in_race:
+        return 0.0
+    return min(max(lap / laps_in_race, 0.0), 1.0)
+
+
+def bar_color(flag: Flag) -> Rgb:
+    return LED_COLORS[flag]

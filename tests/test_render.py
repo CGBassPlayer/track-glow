@@ -1,9 +1,13 @@
 from track_glow.models import Flag
 from track_glow.render import (
+    BAR_TRACK,
     LED_COLORS,
     OFF,
+    bar_color,
+    bar_fraction,
     blocks,
     flag_frame,
+    progress_bar,
     solid,
 )
 
@@ -52,3 +56,32 @@ def test_frame_length_is_3n():
 
 def test_every_flag_has_led_color():
     assert set(LED_COLORS) == set(Flag)
+
+
+def test_bar_empty_and_full():
+    assert progress_bar(10, 0, GREEN) == solid(10, BAR_TRACK)
+    assert progress_bar(10, 1, GREEN) == solid(10, GREEN)
+
+
+def test_bar_partial_leading_led_blends():
+    frame = progress_bar(10, 0.35, GREEN)
+    assert [led(frame, i) for i in range(10)] == [GREEN] * 3 + [(8, 135, 8)] + [BAR_TRACK] * 6
+
+
+def test_bar_clamps_fraction():
+    assert progress_bar(10, -0.5, GREEN) == solid(10, BAR_TRACK)
+    assert progress_bar(10, 1.7, GREEN) == solid(10, GREEN)
+
+
+def test_bar_fraction_rules():
+    assert bar_fraction(Flag.GREEN, 40, 80) == 0.5
+    assert bar_fraction(Flag.GREEN, 90, 80) == 1.0
+    assert bar_fraction(Flag.CHECKERED, 10, 80) == 1.0
+    assert bar_fraction(Flag.GREEN, None, 80) == 0.0
+    assert bar_fraction(Flag.GREEN, 5, None) == 0.0
+    assert bar_fraction(Flag.GREEN, 5, 0) == 0.0
+
+
+def test_bar_color_checkered_is_white():
+    assert bar_color(Flag.CHECKERED) == WHITE
+    assert bar_color(Flag.GREEN) == GREEN
