@@ -1,3 +1,4 @@
+import threading
 import time
 
 from track_glow.engine import Engine
@@ -158,3 +159,62 @@ def test_status_text_variants():
     assert status_text(EngineState(waiting_for_series=Series.XFINITY)) == "Waiting for Xfinity"
     assert status_text(EngineState(feed=FeedStatus("ok"))) == "No race"
     assert status_text(EngineState(override=Flag.RED)) == "RED · manual override"
+
+
+class BlockingSource(RaceSource):
+    def __init__(self):
+        self.release = threading.Event()
+        self.entered = threading.Event()
+        self.closed = False
+
+    def fetch(self):
+        self.entered.set()
+        self.release.wait(15)
+        return race()
+
+    def close(self):
+        self.closed = True
+
+
+def test_stop_does_not_block_on_hung_request():
+    src = BlockingSource()
+    e = Engine(src, follow=Series.CUP, source_kind="live")
+    e.start()
+    assert src.entered.wait(2)
+    t0 = time.monotonic()
+    e.stop()
+    assert time.monotonic() - t0 < 2
+    assert e.running
+    assert not src.closed
+    src.release.set()
+    deadline = time.monotonic() + 2
+    while e.running and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert not e.running and src.closed
+
+
+def test_start_while_running_does_not_spawn_second_thread():
+    src = BlockingSource()
+    e = Engine(src, follow=Series.CUP, source_kind="live")
+    e.start()
+    assert src.entered.wait(2)
+    e.start()
+    names = [t.name for t in threading.enumerate()].count("track-glow-engine")
+    src.release.set()
+    e.stop()
+    assert names == 1
+
+
+def test_stop_without_start_closes_source():
+    src = ScriptedSource(race())
+    Engine(src, follow=Series.CUP, source_kind="live").stop()
+    assert src.closed
+
+
+def test_status_text_live_race_with_unknown_flag():
+    from track_glow.engine import EngineState, status_text
+    from track_glow.models import FeedStatus
+
+    unknown = RaceState(None, 7, Series.CUP, 1, lap=112, laps_in_race=267)
+    text = status_text(EngineState(race=unknown, feed=FeedStatus("ok")))
+    assert text == "Flag unknown (7) · Cup · Lap 112/267"

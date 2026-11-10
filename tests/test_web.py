@@ -63,3 +63,8 @@ def test_override_post_sets_and_clears(green_engine):
 
 def test_override_unknown_flag_422(green_engine):
     assert client(green_engine).post("/api/override", json={"flag": "purple"}).status_code == 422
+
+
+def test_index_resets_display_when_unreachable(fake_engine):
+    html = client(fake_engine).get("/").text
+    assert "Not connected" in html and "r.ok" in html

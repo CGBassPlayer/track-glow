@@ -8,6 +8,8 @@ from track_glow.sources import FeedError, RaceSource
 
 log = logging.getLogger(__name__)
 
+STOP_JOIN_SECONDS = 1.0
+
 
 @dataclass(frozen=True)
 class EngineState:
@@ -99,21 +101,30 @@ class Engine:
         return min(self._poll_seconds * 2 ** min(failures, 4), self._max_backoff)
 
     def start(self) -> None:
+        if self.running:
+            return
         self._stop.clear()
         self._thread = threading.Thread(target=self._run, name="track-glow-engine", daemon=True)
         self._thread.start()
 
     def _run(self) -> None:
         delay = 0.0
-        while not self._stop.wait(delay):
-            delay = self.poll_once()
+        try:
+            while not self._stop.wait(delay):
+                delay = self.poll_once()
+        finally:
+            self._source.close()
 
     def stop(self) -> None:
+        # A request can hang well past its per-operation timeouts; don't block the caller
+        # (often the Qt main thread) on it. The daemon thread closes the source on exit.
         self._stop.set()
-        if self._thread is not None:
-            self._thread.join(10)
+        if self._thread is None:
+            self._source.close()
+            return
+        self._thread.join(STOP_JOIN_SECONDS)
+        if not self._thread.is_alive():
             self._thread = None
-        self._source.close()
 
 
 def status_text(state: EngineState) -> str:
@@ -124,9 +135,10 @@ def status_text(state: EngineState) -> str:
     if state.waiting_for_series is not None:
         return f"Waiting for {state.waiting_for_series.label}"
     race = state.race
-    if race is None or race.flag is None:
+    if race is None:
         return "No race"
-    parts = [race.flag.label, race.series.label]
+    flag = race.flag.label if race.flag else f"Flag unknown ({race.raw_flag})"
+    parts = [flag, race.series.label]
     if race.lap is not None:
         parts.append(f"Lap {race.lap}" + (f"/{race.laps_in_race}" if race.laps_in_race else ""))
     return " · ".join(parts)

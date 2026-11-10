@@ -81,9 +81,17 @@ INDEX_HTML = """<!doctype html>
   </div>
 </main>
 <script>
+function disconnected(reason) {
+  document.getElementById("status").textContent = "Not connected";
+  document.getElementById("swatch").style.background = "#9e9e9e";
+  document.getElementById("detail").textContent = "";
+  document.getElementById("feed").textContent = reason;
+}
 async function refresh() {
   try {
-    const s = await (await fetch("/api/state")).json();
+    const r = await fetch("/api/state");
+    if (!r.ok) { disconnected("Track Glow error (HTTP " + r.status + ")"); return; }
+    const s = await r.json();
     document.getElementById("status").textContent = s.status;
     document.getElementById("swatch").style.background = s.flag_color || "#9e9e9e";
     document.getElementById("detail").textContent =
@@ -92,7 +100,7 @@ async function refresh() {
     document.getElementById("feed").textContent =
       s.feed.message ? feed + " — " + s.feed.message : feed;
   } catch (e) {
-    document.getElementById("feed").textContent = "Track Glow not reachable";
+    disconnected("Track Glow not reachable");
   }
 }
 refresh();
