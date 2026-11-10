@@ -1,3 +1,4 @@
+import builtins
 import socket
 import sys
 
@@ -19,10 +20,39 @@ def test_explicit_host_port_win():
     assert (a.host, a.port) == ("127.0.0.1", 9000)
 
 
+def fail_launcher_import(monkeypatch, error: ImportError) -> None:
+    monkeypatch.setenv("DISPLAY", ":0")
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "track_glow.launcher":
+            raise error
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+
 def test_missing_pyside_prints_hint(monkeypatch, capsys):
-    monkeypatch.setitem(sys.modules, "track_glow.launcher", None)
+    fail_launcher_import(
+        monkeypatch, ModuleNotFoundError("No module named 'PySide6'", name="PySide6")
+    )
     assert main([]) == 1
     assert "track-glow[desktop]" in capsys.readouterr().err
+
+
+def test_broken_desktop_import_shows_real_error(monkeypatch, capsys):
+    fail_launcher_import(monkeypatch, ImportError("libEGL.so.1: cannot open shared object file"))
+    assert main([]) == 1
+    err = capsys.readouterr().err
+    assert "libEGL.so.1" in err and "track-glow[desktop]" not in err
+
+
+def test_no_display_on_linux_suggests_headless(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "platform", "linux")
+    for var in ("DISPLAY", "WAYLAND_DISPLAY", "QT_QPA_PLATFORM"):
+        monkeypatch.delenv(var, raising=False)
+    assert main([]) == 1
+    assert "--headless" in capsys.readouterr().err
 
 
 def test_headless_port_in_use_exits_1(capsys):
