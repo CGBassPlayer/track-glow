@@ -218,3 +218,142 @@ def test_status_text_live_race_with_unknown_flag():
     unknown = RaceState(None, 7, Series.CUP, 1, lap=112, laps_in_race=267)
     text = status_text(EngineState(race=unknown, feed=FeedStatus("ok")))
     assert text == "Flag unknown (7) · Cup · Lap 112/267"
+
+
+def test_configure_resets_race_and_keeps_override_and_mode():
+    e = engine(race())
+    e.poll_once()
+    e.set_override(Flag.RED)
+    e.set_mode("blackout")
+    e.configure(ScriptedSource(race()), follow=None, kind="replay")
+    s = e.snapshot()
+    assert s.race is None and s.waiting_for_series is None
+    assert s.feed.health == "connecting" and s.feed.failures == 0
+    assert s.override is Flag.RED and s.mode == "blackout"
+    assert s.follow is None and s.source_kind == "replay"
+
+
+def test_configure_resets_waiting_and_failures():
+    e = engine(race(series=Series.XFINITY))
+    e.poll_once()
+    e.configure(ScriptedSource(FeedError("down")), follow=Series.CUP, kind="live")
+    e.poll_once()
+    e.configure(ScriptedSource(race()), follow=Series.TRUCK, kind="live")
+    s = e.snapshot()
+    assert s.waiting_for_series is None and s.feed.failures == 0
+    assert s.follow is Series.TRUCK
+
+
+def test_configure_closes_old_source_and_polls_new():
+    old = ScriptedSource(race())
+    e = Engine(old, follow=Series.CUP, source_kind="live")
+    e.configure(ScriptedSource(race(Flag.YELLOW)), follow=Series.CUP, kind="live")
+    assert old.closed
+    e.poll_once()
+    assert e.snapshot().flag is Flag.YELLOW
+
+
+def test_stale_fetch_after_configure_is_dropped():
+    old = BlockingSource()
+    e = Engine(old, follow=Series.CUP, source_kind="live")
+    result = []
+    t = threading.Thread(target=lambda: result.append(e.poll_once()))
+    t.start()
+    assert old.entered.wait(2)
+    e.configure(ScriptedSource(race()), follow=Series.CUP, kind="live")
+    old.release.set()
+    t.join(2)
+    assert result == [0]
+    s = e.snapshot()
+    assert s.race is None and s.feed.failures == 0 and s.feed.health == "connecting"
+
+
+class BlockingFailSource(BlockingSource):
+    def fetch(self):
+        self.entered.set()
+        self.release.wait(15)
+        raise FeedError("old down")
+
+
+def test_stale_failure_after_configure_is_not_counted():
+    old = BlockingFailSource()
+    e = Engine(old, follow=Series.CUP, source_kind="live")
+    result = []
+    t = threading.Thread(target=lambda: result.append(e.poll_once()))
+    t.start()
+    assert old.entered.wait(2)
+    e.configure(ScriptedSource(race()), follow=Series.CUP, kind="live")
+    old.release.set()
+    t.join(2)
+    assert result == [0]
+    assert e.snapshot().feed.failures == 0 and e.snapshot().feed.message == ""
+
+
+class SignalSource(RaceSource):
+    def __init__(self, result):
+        self.result = result
+        self.fetched = threading.Event()
+        self.closed = False
+
+    def fetch(self):
+        self.fetched.set()
+        if isinstance(self.result, BaseException):
+            raise self.result
+        return self.result
+
+    def close(self):
+        self.closed = True
+
+
+def test_configure_wakes_running_engine():
+    old = SignalSource(FeedError("down"))
+    e = Engine(old, follow=Series.CUP, source_kind="live", poll_seconds=30.0)
+    e.start()
+    try:
+        assert old.fetched.wait(2)
+        new = SignalSource(race())
+        e.configure(new, follow=Series.CUP, kind="live")
+        assert new.fetched.wait(0.5)
+    finally:
+        e.stop()
+
+
+def test_thread_closes_current_source_on_exit():
+    old = SignalSource(race())
+    e = Engine(old, follow=Series.CUP, source_kind="live", poll_seconds=30.0)
+    e.start()
+    assert old.fetched.wait(2)
+    new = SignalSource(race())
+    e.configure(new, follow=Series.CUP, kind="live")
+    assert new.fetched.wait(2)
+    e.stop()
+    assert not e.running and new.closed
+
+
+def test_set_mode():
+    import pytest
+
+    e = engine(race())
+    assert e.snapshot().mode == "on"
+    for mode in ("paused", "blackout", "on"):
+        e.set_mode(mode)
+        assert e.snapshot().mode == mode
+    with pytest.raises(ValueError):
+        e.set_mode("off")
+    assert e.snapshot().mode == "on"
+
+
+def test_status_text_mode_prefix():
+    from track_glow.engine import EngineState, status_text
+    from track_glow.models import FeedStatus
+
+    full = RaceState(Flag.GREEN, 1, Series.CUP, 1, lap=112, laps_in_race=267)
+    ok = FeedStatus("ok")
+    assert status_text(EngineState(race=full, feed=ok, mode="paused")) == (
+        "Paused · GREEN · Cup · Lap 112/267"
+    )
+    assert status_text(EngineState(feed=ok, mode="blackout")) == "Blackout · No race"
+    assert status_text(EngineState(override=Flag.RED, mode="paused")) == (
+        "Paused · RED · manual override"
+    )
+    assert status_text(EngineState(race=full, feed=ok, mode="on")) == "GREEN · Cup · Lap 112/267"
