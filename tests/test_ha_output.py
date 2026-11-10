@@ -99,7 +99,7 @@ def test_failure_retries_after_interval_then_recovers():
     out.step(5.9)
     assert len(client.calls) == 2
     client.fail = None
-    out.step(6.0)
+    out.step(6.1)
     assert len(client.calls) == 3
     assert out.ha_status().state == "ok"
 
@@ -216,3 +216,38 @@ def test_stop_is_prompt_with_blocked_call():
     out.stop()
     assert time.monotonic() - t0 < 1.5
     gate.set()
+
+
+def test_retry_waits_after_slow_failure():
+    clock = {"t": 0.0}
+
+    class Slow(FakeClient):
+        def turn_on_scene(self, entity):
+            self.calls.append(entity)
+            clock["t"] += 5.0
+            raise HaError("timeout")
+
+    FakeClient.made = []
+    out = HomeAssistantOutput(
+        FakeEngine(race_state()), client_factory=Slow, clock=lambda: clock["t"]
+    )
+    out.configure(url="http://ha", token="t", verify_tls=True, scenes=SCENES, offline_hold=False)
+    out.step(0.0)
+    out.step(clock["t"])
+    assert len(FakeClient.made[0].calls) == 1
+    out.step(clock["t"] + 5.0)
+    assert len(FakeClient.made[0].calls) == 2
+
+
+def test_status_when_paused_or_waiting_for_flag():
+    out = make(FakeEngine(replace(race_state(), mode="paused")))
+    out.step(0.0)
+    assert out.ha_status() == HaStatus("idle", "Paused")
+    out = make(FakeEngine(EngineState(feed=FeedStatus("offline"))), hold=True)
+    out.step(0.0)
+    assert out.ha_status() == HaStatus("idle", "Waiting for a flag")
+
+
+def test_config_repr_hides_token():
+    out = make()
+    assert "'t'" not in repr(out._config) and "token=" not in repr(out._config)

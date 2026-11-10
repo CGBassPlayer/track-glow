@@ -183,3 +183,23 @@ def test_close_leaves_injected_client_open():
     HaClient(URL, TOKEN, client=client).close()
     assert not client.is_closed
     client.close()
+
+
+def test_invalid_url_and_token_map_to_ha_error_without_token():
+    import httpx2
+
+    from track_glow.ha import HaClient, HaError
+
+    def handler(request):
+        return httpx2.Response(200, json={})
+
+    transport = httpx2.MockTransport(handler)
+    bad_port = HaClient("http://127.0.0.1:abc", "t", client=httpx2.Client(transport=transport))
+    with pytest.raises(HaError, match="Invalid Home Assistant URL"):
+        bad_port.check()
+    token = "abc​secret"
+    bad_token = HaClient("http://ha", token, client=httpx2.Client(transport=transport))
+    with pytest.raises(HaError) as e:
+        bad_token.check()
+    assert str(e.value) == "Access token has invalid characters"
+    assert "secret" not in repr(e.value) and e.value.__cause__ is None

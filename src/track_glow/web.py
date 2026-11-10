@@ -280,7 +280,14 @@ SCENES.forEach(([key, label]) => {
 document.getElementById("ha-test").onclick = async () => {
   const out = document.getElementById("ha-test-result");
   out.textContent = "Testing…";
-  const r = await (await fetch("/api/ha/test", {method: "POST"})).json();
+  let r;
+  try {
+    const res = await fetch("/api/ha/test", {method: "POST"});
+    r = await res.json();
+  } catch (e) {
+    out.textContent = "Test failed (Track Glow error)";
+    return;
+  }
   if (!r.ok) { out.textContent = r.error; return; }
   out.textContent = "Connected · " + r.scenes.length + " scenes";
   const list = document.getElementById("ha-scene-list");

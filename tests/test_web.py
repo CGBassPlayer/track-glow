@@ -318,3 +318,8 @@ def test_page_has_home_assistant_card(fake_engine):
     html = client(fake_engine).get("/").text
     for hook in ('id="ha-url"', 'id="ha-token"', "/api/ha/test", "<datalist", 'id="ha-scenes"'):
         assert hook in html, hook
+
+
+def test_page_ha_test_handles_errors(fake_engine):
+    html = client(fake_engine).get("/").text
+    assert 'out.textContent = "Test failed' in html

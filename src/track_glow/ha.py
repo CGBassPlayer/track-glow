@@ -52,6 +52,10 @@ class HaClient:
             response = self._client.request(
                 method, f"{self._url}{path}", headers=self._headers, timeout=_TIMEOUT, **kwargs
             )
+        except httpx2.InvalidURL:
+            raise HaError("Invalid Home Assistant URL") from None
+        except UnicodeError:
+            raise HaError("Access token has invalid characters") from None
         except httpx2.RequestError as e:
             if _is_tls(e):
                 raise HaError(_TLS_MESSAGE) from None

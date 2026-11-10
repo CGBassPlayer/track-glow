@@ -2,7 +2,7 @@ import logging
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 from track_glow.engine import EngineState
@@ -25,7 +25,7 @@ class HaStatus:
 @dataclass(frozen=True)
 class _Config:
     url: str = ""
-    token: str = ""
+    token: str = field(default="", repr=False)
     verify_tls: bool = True
     scenes: tuple[tuple[str, str], ...] = ()
     offline_hold: bool = False
@@ -91,6 +91,15 @@ class HomeAssistantOutput(Output):
             self._status = status
             return True
 
+    def _replace_connecting(self, generation: int, message: str) -> None:
+        with self._lock:
+            if generation == self._generation and self._status.message in (
+                "Connecting",
+                "Paused",
+                "Waiting for a flag",
+            ):
+                self._status = HaStatus("idle", message, self._status.scene)
+
     def step(self, now: float) -> None:
         with self._lock:
             generation, config = self._generation, self._config
@@ -109,9 +118,13 @@ class HomeAssistantOutput(Output):
             return
         state = self._engine.snapshot()
         if state.mode == "paused":
+            self._replace_connecting(generation, "Paused")
             return
         key = self._key(state, config.offline_hold)
-        if key is None or key == self._sent_key:
+        if key is None:
+            self._replace_connecting(generation, "Waiting for a flag")
+            return
+        if key == self._sent_key:
             return
         entity = dict(config.scenes).get(key)
         if not entity:
@@ -120,11 +133,14 @@ class HomeAssistantOutput(Output):
             return
         if key == self._failed_key and now < self._next_try:
             return
+        started = self._clock()
         try:
             self._client.turn_on_scene(entity)
         except HaError as e:
             if self._set_status(generation, HaStatus("error", str(e))):
-                self._failed_key, self._next_try = key, now + self._retry
+                self._failed_key = key
+                # From the attempt end: a call that hits its timeout must not retry back-to-back.
+                self._next_try = now + (self._clock() - started) + self._retry
                 self._sent_key = None
             return
         if self._set_status(generation, HaStatus("ok", "", entity)):

@@ -1,6 +1,7 @@
 import dataclasses
 import json
 import os
+import re
 import tempfile
 import threading
 from collections.abc import Callable
@@ -27,6 +28,7 @@ SCENE_LABELS = {
     "blackout": "Blackout",
 }
 SCENE_KEYS = tuple(SCENE_LABELS)
+_SCENE_ID = re.compile(r"scene\.[a-z0-9_]+")
 _HA_FIELDS = ("ha_url", "ha_token", "ha_verify_tls", "ha_scenes")
 
 
@@ -45,7 +47,7 @@ class Settings:
     progress: str | None = None
     offline: str = "amber"
     ha_url: str = ""
-    ha_token: str = ""
+    ha_token: str = dataclasses.field(default="", repr=False)
     ha_verify_tls: bool = True
     ha_scenes: dict[str, str] = dataclasses.field(default_factory=dict)
 
@@ -67,8 +69,10 @@ class Settings:
         for key in patch:
             if key not in known:
                 raise SettingsError(key, f"Unknown setting {key}")
-        if patch.get("ha_token") == "":
-            del patch["ha_token"]
+        if isinstance(patch.get("ha_token"), str):
+            patch["ha_token"] = patch["ha_token"].strip()
+            if not patch["ha_token"]:
+                del patch["ha_token"]
         return self._with(patch)
 
     def _with(self, d: dict) -> "Settings":
@@ -126,16 +130,24 @@ class Settings:
     def _validate_ha(self) -> None:
         if self.ha_url:
             parts = urlsplit(self.ha_url)
-            if parts.scheme not in ("http", "https") or not parts.hostname:
+            try:
+                _ = parts.port
+                valid = parts.scheme in ("http", "https") and bool(parts.hostname)
+            except ValueError:
+                valid = False
+            if not valid:
                 raise SettingsError(
-                    "ha_url", f"Invalid Home Assistant URL {self.ha_url!r}; expected http(s)://HOST"
+                    "ha_url",
+                    f"Invalid Home Assistant URL {self.ha_url!r}; expected http(s)://HOST[:PORT]",
                 )
             if not self.ha_token:
                 raise SettingsError("ha_token", "Home Assistant needs an access token")
+        if self.ha_token and not (self.ha_token.isascii() and self.ha_token.isprintable()):
+            raise SettingsError("ha_token", "Access token has invalid characters")
         for key, entity in self.ha_scenes.items():
             if key not in SCENE_KEYS:
                 raise SettingsError("ha_scenes", f"Unknown scene key {key}")
-            if not entity.startswith("scene."):
+            if not _SCENE_ID.fullmatch(entity):
                 raise SettingsError(
                     "ha_scenes", f"Scene for {key} must start with 'scene.', got {entity!r}"
                 )

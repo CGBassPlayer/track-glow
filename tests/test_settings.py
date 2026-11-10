@@ -536,3 +536,33 @@ def test_service_exposes_ha(tmp_path):
 
     svc = SettingsService(tmp_path / "s.json", Settings(), None, None, ha="HA")
     assert svc.ha == "HA"
+
+
+@pytest.mark.parametrize("url", ["http://127.0.0.1:abc", "http://ha:99999"])
+def test_ha_url_bad_port_rejected(url):
+    with pytest.raises(SettingsError) as e:
+        Settings().merged({"ha_url": url, "ha_token": "t"})
+    assert e.value.field == "ha_url"
+
+
+@pytest.mark.parametrize("token", ["abc​def", "café", "a\nb"])
+def test_ha_token_must_be_printable_ascii(token):
+    with pytest.raises(SettingsError) as e:
+        Settings().merged({"ha_url": "http://ha", "ha_token": token})
+    assert e.value.field == "ha_token" and token not in e.value.message
+
+
+def test_ha_token_whitespace_stripped_and_blank_keeps_saved():
+    s = Settings().merged({"ha_url": "http://ha", "ha_token": "  tok  "})
+    assert s.ha_token == "tok"
+    assert s.merged({"ha_token": "   "}).ha_token == "tok"
+
+
+@pytest.mark.parametrize("entity", ["scene.", "scene.a b", "scene.A-b"])
+def test_ha_scene_id_shape(entity):
+    with pytest.raises(SettingsError):
+        Settings().merged({"ha_scenes": {"green": entity}})
+
+
+def test_token_hidden_from_repr():
+    assert "s3cret" not in repr(Settings(ha_url="http://ha", ha_token="s3cret"))
