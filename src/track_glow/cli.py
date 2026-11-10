@@ -7,6 +7,7 @@ from typing import Annotated
 
 import typer
 
+from track_glow import __version__
 from track_glow.engine import Engine, status_text
 from track_glow.outputs.ha import HomeAssistantOutput
 from track_glow.outputs.wled import WledOutput
@@ -37,6 +38,12 @@ class SeriesChoice(StrEnum):
 
 
 app = typer.Typer(add_completion=False, pretty_exceptions_enable=False)
+
+
+def _print_version(value: bool) -> None:
+    if value:
+        print(f"track-glow {__version__}")
+        raise typer.Exit()
 
 
 def has_display() -> bool:
@@ -99,6 +106,12 @@ def _run_desktop(
 
 @app.command()
 def run(
+    version: Annotated[
+        bool,
+        typer.Option(
+            "--version", callback=_print_version, is_eager=True, help="Show the version and exit."
+        ),
+    ] = False,
     headless: Annotated[
         bool, typer.Option("--headless", help="Serve the web UI with no window.")
     ] = False,

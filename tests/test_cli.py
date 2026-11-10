@@ -246,3 +246,24 @@ def test_home_assistant_built_from_settings_and_stopped(calls, settings_file, mo
     assert ha.ha_status().state == "idle"
     assert ha._config.url == "http://ha:8123" and dict(ha._config.scenes) == {"green": "scene.g"}
     assert stopped == [ha]
+
+
+def test_version_flag(capsys):
+    from track_glow import __version__
+
+    assert main(["--version"]) == 0
+    assert capsys.readouterr().out.strip() == f"track-glow {__version__}"
+
+
+def test_python_dash_m_entry():
+    import subprocess
+
+    from track_glow import __version__
+
+    r = subprocess.run(
+        [sys.executable, "-m", "track_glow", "--version"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert r.returncode == 0 and r.stdout.strip() == f"track-glow {__version__}"
