@@ -17,6 +17,11 @@ class EngineLike(Protocol):
     def stop(self) -> None: ...
 
 
+class LightsLike(Protocol):
+    def status(self) -> list: ...
+    def frame(self) -> bytes: ...
+
+
 class OverrideRequest(BaseModel):
     flag: FlagKey | None  # type: ignore[valid-type]
 
@@ -66,6 +71,8 @@ INDEX_HTML = """<!doctype html>
             background: #9e9e9e; border: 1px solid var(--line); }
   #status { font-size: 1.25rem; font-weight: 600; margin: 0; }
   .muted { color: var(--muted); margin: .25rem 0 0; }
+  #strip-wrap { margin-top: 1rem; }
+  #strip { width: 100%; display: block; background: #000; border-radius: 6px; }
 </style>
 </head>
 <body>
@@ -78,6 +85,10 @@ INDEX_HTML = """<!doctype html>
       <p id="detail" class="muted"></p>
       <p id="feed" class="muted"></p>
     </div>
+  </div>
+  <div id="strip-wrap" hidden>
+    <canvas id="strip"></canvas>
+    <p id="lights" class="muted"></p>
   </div>
 </main>
 <script>
@@ -105,13 +116,53 @@ async function refresh() {
 }
 refresh();
 setInterval(refresh, 2000);
+
+const LED = 10;
+async function drawStrip() {
+  const wrap = document.getElementById("strip-wrap");
+  try {
+    const r = await fetch("/api/frame");
+    if (!r.ok) return;
+    const f = await r.json();
+    const s = await (await fetch("/api/state")).json();
+    wrap.hidden = s.lights.length === 0;
+    document.getElementById("lights").textContent = s.lights
+      .map(l => l.host + ": " + (l.state === "ok"
+        ? l.led_count + " LEDs"
+        : l.state + (l.message ? " — " + l.message : "")))
+      .join(" · ");
+    const c = document.getElementById("strip");
+    const perRow = Math.max(1, Math.floor(c.clientWidth / LED));
+    const n = f.led_count;
+    c.width = perRow * LED;
+    c.height = Math.max(1, Math.ceil(n / perRow)) * LED;
+    const g = c.getContext("2d");
+    g.fillStyle = "#000";
+    g.fillRect(0, 0, c.width, c.height);
+    for (let i = 0; i < n; i++) {
+      g.fillStyle = "#" + f.pixels.substr(i * 6, 6);
+      g.fillRect((i % perRow) * LED + 1, Math.floor(i / perRow) * LED + 1, LED - 2, LED - 2);
+    }
+  } catch (e) {}
+}
+drawStrip();
+setInterval(drawStrip, 200);
 </script>
 </body>
 </html>
 """
 
 
-def create_app(engine: EngineLike) -> FastAPI:
+def lights_json(lights: LightsLike | None) -> list[dict[str, Any]]:
+    if lights is None:
+        return []
+    return [
+        {"host": c.host, "led_count": c.led_count, "state": c.state, "message": c.message}
+        for c in lights.status()
+    ]
+
+
+def create_app(engine: EngineLike, lights: LightsLike | None = None) -> FastAPI:
     app = FastAPI(title="Track Glow", version=__version__)
 
     @app.get("/", response_class=HTMLResponse)
@@ -124,11 +175,16 @@ def create_app(engine: EngineLike) -> FastAPI:
 
     @app.get("/api/state")
     def state() -> dict[str, Any]:
-        return state_json(engine.snapshot())
+        return {**state_json(engine.snapshot()), "lights": lights_json(lights)}
+
+    @app.get("/api/frame")
+    def frame() -> dict[str, Any]:
+        pixels = lights.frame() if lights is not None else b""
+        return {"pixels": pixels.hex(), "led_count": len(pixels) // 3}
 
     @app.post("/api/override")
     def override(req: OverrideRequest) -> dict[str, Any]:
         engine.set_override(Flag[req.flag.upper()] if req.flag else None)
-        return state_json(engine.snapshot())
+        return {**state_json(engine.snapshot()), "lights": lights_json(lights)}
 
     return app

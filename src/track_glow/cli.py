@@ -9,8 +9,10 @@ import typer
 
 from track_glow.engine import Engine, status_text
 from track_glow.models import Series
+from track_glow.outputs.wled import WledOutput
 from track_glow.server import ServerStartError, WebServer
 from track_glow.sources import build_source
+from track_glow.wled import ControllerSpec
 
 DEFAULT_PORT = 8780
 DESKTOP_EXTRA_HINT = (
@@ -37,10 +39,10 @@ def has_display() -> bool:
     return any(os.environ.get(v) for v in ("DISPLAY", "WAYLAND_DISPLAY", "QT_QPA_PLATFORM"))
 
 
-def _run_headless(engine: Engine, host: str, port: int) -> int:
+def _run_headless(engine: Engine, host: str, port: int, lights: WledOutput | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     logging.getLogger("httpx2").setLevel(logging.WARNING)
-    srv = WebServer(host, port, engine)
+    srv = WebServer(host, port, engine, lights)
     srv.start()
     log.info("Track Glow web UI: %s", srv.url)
     last = None
@@ -59,7 +61,7 @@ def _run_headless(engine: Engine, host: str, port: int) -> int:
     return 0
 
 
-def _run_desktop(engine: Engine, host: str, port: int) -> int:
+def _run_desktop(engine: Engine, host: str, port: int, lights: WledOutput | None = None) -> int:
     if not has_display():
         print(NO_DISPLAY_HINT, file=sys.stderr)
         return 1
@@ -72,7 +74,7 @@ def _run_desktop(engine: Engine, host: str, port: int) -> int:
         msg = DESKTOP_EXTRA_HINT if pyside_missing else f"Can't start desktop mode: {e}"
         print(msg, file=sys.stderr)
         return 1
-    return launcher.run_launcher(engine, host, port)
+    return launcher.run_launcher(engine, host, port, lights)
 
 
 @app.command()
@@ -89,20 +91,38 @@ def run(
         SeriesChoice, typer.Option(help="Series to follow; other live series are ignored.")
     ] = SeriesChoice.cup,
     replay: Annotated[bool, typer.Option("--replay", help="Loop a demo race.")] = False,
+    wled: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--wled",
+            metavar="HOST[:LEDS]",
+            help="WLED controller, repeatable, in strip order. LEDS skips discovery.",
+        ),
+    ] = None,
 ) -> int:
     if host is None:
         host = "0.0.0.0" if headless else "127.0.0.1"
     follow = None if series is SeriesChoice.any else Series[series.name.upper()]
     kind = "replay" if replay else "live"
     engine = Engine(build_source(kind, follow), follow, kind)
+    try:
+        specs = [ControllerSpec.parse(w) for w in wled or []]
+    except ValueError as e:
+        print(f"Invalid --wled value: {e}", file=sys.stderr)
+        return 2
+    lights = WledOutput(engine, specs) if specs else None
     engine.start()
+    if lights is not None:
+        lights.start()
     try:
         runner = _run_headless if headless else _run_desktop
-        return runner(engine, host, port)
+        return runner(engine, host, port, lights)
     except ServerStartError as e:
         print(e, file=sys.stderr)
         return 1
     finally:
+        if lights is not None:
+            lights.stop()
         engine.stop()
 
 

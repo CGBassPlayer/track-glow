@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 
 from track_glow.engine import status_text
 from track_glow.server import ServerStartError, WebServer
-from track_glow.web import EngineLike
+from track_glow.web import EngineLike, LightsLike
 
 APP_NAME = "Track Glow"
 TRAY_COLOR = "#2e7d32"
@@ -44,10 +44,12 @@ class LauncherWindow(QMainWindow):
         server_factory: Callable[[str, int], WebServer] | None = None,
         open_url: Callable[[str], object] = open_in_browser,
         tray_available: bool | None = None,
+        lights: LightsLike | None = None,
     ):
         super().__init__()
         self._engine = engine
-        self._server_factory = server_factory or (lambda h, p: WebServer(h, p, engine))
+        self._lights = lights
+        self._server_factory = server_factory or (lambda h, p: WebServer(h, p, engine, lights))
         self._open_url = open_url
         self._server: WebServer | None = None
         if tray_available is None:
@@ -103,6 +105,9 @@ class LauncherWindow(QMainWindow):
 
         layout = QVBoxLayout()
         layout.addLayout(status_row)
+        self.lights_label = QLabel()
+        self.lights_label.setHidden(lights is None)
+        layout.addWidget(self.lights_label)
         layout.addLayout(address_row)
         layout.addWidget(self.url_label)
         layout.addLayout(button_row)
@@ -141,6 +146,8 @@ class LauncherWindow(QMainWindow):
         self.flag_swatch.setStyleSheet(f"background: {color}; border-radius: 4px;")
         if self.tray is not None:
             self.tray.setToolTip(f"{APP_NAME} · {text}")
+        if self._lights is not None:
+            self.lights_label.setText(lights_summary(self._lights.status()))
 
     def _start(self, host: str, port: int) -> None:
         self._server = self._server_factory(host, port)
@@ -196,10 +203,17 @@ class LauncherWindow(QMainWindow):
         event.accept()
 
 
-def run_launcher(engine: EngineLike, host: str, port: int) -> int:
+def lights_summary(statuses: list) -> str:
+    ok = sum(1 for c in statuses if c.state == "ok")
+    text = f"Lights: {ok}/{len(statuses)} ok"
+    problem = next((c.message for c in statuses if c.state == "error" and c.message), "")
+    return f"{text} — {problem}" if problem else text
+
+
+def run_launcher(engine: EngineLike, host: str, port: int, lights: LightsLike | None = None) -> int:
     app = QApplication.instance() or QApplication([])
     app.setApplicationName(APP_NAME)
     app.setQuitOnLastWindowClosed(False)
-    window = LauncherWindow(engine, host, port)
+    window = LauncherWindow(engine, host, port, lights=lights)
     window.show()
     return app.exec()

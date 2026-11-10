@@ -8,6 +8,7 @@ from track_glow import cli, launcher
 from track_glow.cli import main
 from track_glow.engine import Engine
 from track_glow.models import Series
+from track_glow.outputs.wled import WledOutput
 from track_glow.sources import build_source
 from track_glow.sources.nascar import NascarFeedSource
 from track_glow.sources.replay import ReplaySource
@@ -16,6 +17,7 @@ from track_glow.sources.replay import ReplaySource
 @pytest.fixture(autouse=True)
 def no_engine_thread(monkeypatch):
     monkeypatch.setattr(Engine, "start", lambda self: None)
+    monkeypatch.setattr(WledOutput, "start", lambda self: None)
 
 
 @pytest.fixture
@@ -23,9 +25,11 @@ def calls(monkeypatch):
     recorded = []
 
     def record(mode):
-        def run(engine, h, p):
+        def run(engine, h, p, lights=None):
             snap = engine.snapshot()
             recorded.append((mode, h, p, snap.source_kind, snap.follow))
+            if lights is not None:
+                recorded.append(("lights", [(c.host, c.led_count) for c in lights.status()]))
             return 0
 
         return run
@@ -125,3 +129,19 @@ def test_build_source_kinds():
     replay = build_source("replay", None)
     assert isinstance(replay, ReplaySource) and replay.fetch().series is Series.CUP
     assert build_source("replay", Series.TRUCK).fetch().series is Series.TRUCK
+
+
+def test_wled_specs_build_output(calls):
+    assert main(["--headless", "--wled", "10.0.0.5:60", "--wled", "wled.local"]) == 0
+    assert calls[1] == ("lights", [("10.0.0.5", 60), ("wled.local", None)])
+
+
+def test_no_wled_means_no_output(calls):
+    assert main(["--headless"]) == 0
+    assert len(calls) == 1
+
+
+def test_bad_wled_spec_exit_2(calls, capsys):
+    assert main(["--headless", "--wled", "10.0.0.5:abc"]) == 2
+    assert calls == []
+    assert "10.0.0.5:abc" in capsys.readouterr().err

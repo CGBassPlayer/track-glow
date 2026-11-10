@@ -4,7 +4,7 @@ import time
 
 import uvicorn
 
-from track_glow.web import EngineLike, create_app
+from track_glow.web import EngineLike, LightsLike, create_app
 
 START_TIMEOUT = 5.0
 STOP_TIMEOUT = 5.0
@@ -33,10 +33,11 @@ def display_host(host: str) -> str:
 
 
 class WebServer:
-    def __init__(self, host: str, port: int, engine: EngineLike):
+    def __init__(self, host: str, port: int, engine: EngineLike, lights: LightsLike | None = None):
         self.host = host
         self.port = port
         self.engine = engine
+        self.lights = lights
         self._server: _ThreadedServer | None = None
         self._thread: threading.Thread | None = None
 
@@ -50,7 +51,10 @@ class WebServer:
 
     def start(self) -> None:
         config = uvicorn.Config(
-            create_app(self.engine), host=self.host, port=self.port, log_level="warning"
+            create_app(self.engine, self.lights),
+            host=self.host,
+            port=self.port,
+            log_level="warning",
         )
         self._server = _ThreadedServer(config)
         self._thread = threading.Thread(target=self._run, name="track-glow-web", daemon=True)

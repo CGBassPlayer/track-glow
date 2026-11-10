@@ -50,6 +50,7 @@ def test_state_green_cup(green_engine):
         "override": None,
         "source": "live",
         "status": "GREEN · Cup · Lap 112/267",
+        "lights": [],
     }
 
 
@@ -68,3 +69,39 @@ def test_override_unknown_flag_422(green_engine):
 def test_index_resets_display_when_unreachable(fake_engine):
     html = client(fake_engine).get("/").text
     assert "Not connected" in html and "r.ok" in html
+
+
+def test_state_includes_lights(fake_engine):
+    from conftest import FakeLights
+
+    from track_glow.outputs.wled import ControllerStatus
+
+    lights = FakeLights(
+        [ControllerStatus("10.0.0.5", 60, "ok"), ControllerStatus("10.0.0.6", None, "error", "x")]
+    )
+    s = TestClient(create_app(fake_engine, lights)).get("/api/state").json()
+    assert s["lights"] == [
+        {"host": "10.0.0.5", "led_count": 60, "state": "ok", "message": ""},
+        {"host": "10.0.0.6", "led_count": None, "state": "error", "message": "x"},
+    ]
+
+
+def test_state_lights_empty_without_output(fake_engine):
+    assert client(fake_engine).get("/api/state").json()["lights"] == []
+
+
+def test_frame_endpoint_hex(fake_engine):
+    from conftest import FakeLights
+
+    lights = FakeLights(frame=bytes([0, 255, 0, 0, 0, 0]))
+    r = TestClient(create_app(fake_engine, lights)).get("/api/frame").json()
+    assert r == {"pixels": "00ff00000000", "led_count": 2}
+
+
+def test_frame_empty_without_output(fake_engine):
+    assert client(fake_engine).get("/api/frame").json() == {"pixels": "", "led_count": 0}
+
+
+def test_index_has_strip_preview(fake_engine):
+    html = client(fake_engine).get("/").text
+    assert 'id="strip"' in html and "/api/frame" in html

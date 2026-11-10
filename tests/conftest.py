@@ -45,3 +45,25 @@ def fake_engine() -> FakeEngine:
 @pytest.fixture
 def green_engine() -> FakeEngine:
     return FakeEngine(EngineState(race=GREEN_CUP, feed=FeedStatus("ok"), follow=Series.CUP))
+
+
+class FakeLights:
+    def __init__(self, statuses=None, frame: bytes = b""):
+        from track_glow.outputs.wled import ControllerStatus
+
+        self.statuses = statuses or [ControllerStatus("10.0.0.5", 2, "ok")]
+        self._frame = frame
+        self.started = False
+        self.stopped = False
+
+    def status(self):
+        return list(self.statuses)
+
+    def frame(self) -> bytes:
+        return self._frame
+
+    def start(self) -> None:
+        self.started = True
+
+    def stop(self) -> None:
+        self.stopped = True

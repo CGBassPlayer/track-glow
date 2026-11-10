@@ -151,3 +151,35 @@ def test_quit_stops_engine(qtbot, monkeypatch):
     w = make(qtbot, engine=engine)
     w.quit_button.click()
     assert engine.stopped
+
+
+def test_lights_line_summarizes_status(qtbot):
+    from conftest import FakeLights
+
+    from track_glow.outputs.wled import ControllerStatus
+
+    lights = FakeLights(
+        [
+            ControllerStatus("10.0.0.5", 60, "ok"),
+            ControllerStatus("10.0.0.6", None, "error", "Can't reach WLED at 10.0.0.6"),
+        ]
+    )
+    w = LauncherWindow(
+        FakeEngine(),
+        "127.0.0.1",
+        8780,
+        FakeServer,
+        opened.append,
+        tray_available=False,
+        lights=lights,
+    )
+    qtbot.addWidget(w)
+    assert w.lights_label.text() == "Lights: 1/2 ok — Can't reach WLED at 10.0.0.6"
+    lights.statuses = [ControllerStatus("10.0.0.5", 60, "ok")]
+    w.refresh_status()
+    assert w.lights_label.text() == "Lights: 1/1 ok"
+
+
+def test_no_lights_line_without_output(qtbot):
+    w = make(qtbot)
+    assert w.lights_label.isHidden()
