@@ -9,3 +9,4 @@ dist/
 # local secrets for manual testing
 .ha-token
 .ha-url
+build/

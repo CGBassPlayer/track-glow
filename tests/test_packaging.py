@@ -25,3 +25,9 @@ def test_dockerfile_runs_headless_as_non_root_with_config_volume():
 def test_compose_uses_host_network_and_config_volume():
     text = (ROOT / "compose.yaml").read_text()
     assert "network_mode: host" in text and "./config:/config" in text
+
+
+def test_pyinstaller_spec_builds_console_app_from_main():
+    text = (ROOT / "packaging" / "track-glow.spec").read_text()
+    assert '"__main__.py"' in text and "console=True" in text
+    assert 'collect_submodules("uvicorn")' in text
