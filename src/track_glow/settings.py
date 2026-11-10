@@ -1,11 +1,15 @@
 import json
 import os
 import tempfile
+import threading
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, fields, replace
 from pathlib import Path
 
 from platformdirs import user_config_dir
 
+from track_glow.models import Series
+from track_glow.sources import build_source as default_build_source
 from track_glow.wled import ControllerSpec, ProgressSpec
 
 VERSION = 1
@@ -135,3 +139,58 @@ def save(path: Path, settings: Settings) -> None:
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
         raise
+
+
+def follow_of(series: str) -> Series | None:
+    return None if series == "any" else Series[series.upper()]
+
+
+class SettingsService:
+    def __init__(
+        self,
+        path: Path,
+        settings: Settings,
+        engine,
+        lights,
+        build_source: Callable = default_build_source,
+        warning: str | None = None,
+    ):
+        self._path = path
+        self._settings = settings
+        self._engine = engine
+        self._lights = lights
+        self._build_source = build_source
+        self._warning = warning
+        self._lock = threading.Lock()
+
+    def get(self) -> Settings:
+        with self._lock:
+            return self._settings
+
+    @property
+    def warning(self) -> str | None:
+        with self._lock:
+            return self._warning
+
+    def update(self, patch: dict) -> Settings:
+        with self._lock:
+            old = self._settings
+            new = old.merged(patch)
+            if (new.series, new.source) != (old.series, old.source):
+                follow = follow_of(new.series)
+                self._engine.configure(self._build_source(new.source, follow), follow, new.source)
+            if (new.controllers, new.progress, new.offline) != (
+                old.controllers,
+                old.progress,
+                old.offline,
+            ):
+                self._lights.configure(
+                    new.specs(), progress=new.progress_spec(), offline_hold=new.offline == "hold"
+                )
+            self._settings = new
+            try:
+                save(self._path, new)
+                self._warning = None
+            except OSError as e:
+                self._warning = f"Applied, but couldn't save settings: {e.strerror or e}"
+            return new

@@ -232,3 +232,83 @@ def test_save_overwrites_existing(tmp_path):
     save(path, Settings(series="truck"))
     save(path, Settings(series="xfinity"))
     assert load(path)[0].series == "xfinity"
+
+
+def _service(tmp_path, settings=None, warning=None):
+    from conftest import FakeEngine, FakeLights
+
+    from track_glow.settings import SettingsService
+
+    engine, lights = FakeEngine(), FakeLights()
+    built = []
+
+    def build(kind, follow):
+        built.append((kind, follow))
+        return f"source:{kind}"
+
+    svc = SettingsService(
+        tmp_path / "s.json",
+        settings or Settings(),
+        engine,
+        lights,
+        build_source=build,
+        warning=warning,
+    )
+    return svc, engine, lights, built
+
+
+def test_service_series_change_reconfigures_engine_only(tmp_path):
+    from track_glow.models import Series
+
+    svc, engine, lights, built = _service(tmp_path)
+    assert svc.update({"series": "truck"}).series == "truck"
+    assert built == [("live", Series.TRUCK)]
+    assert engine.configured == [("source:live", Series.TRUCK, "live")]
+    assert not hasattr(lights, "configured")
+
+
+def test_service_source_any_series_follows_none(tmp_path):
+    svc, engine, lights, built = _service(tmp_path)
+    svc.update({"source": "replay", "series": "any"})
+    assert built == [("replay", None)]
+
+
+def test_service_controllers_change_reconfigures_lights_only(tmp_path):
+    from track_glow.wled import ControllerSpec, ProgressSpec
+
+    svc, engine, lights, built = _service(tmp_path)
+    svc.update({"controllers": ["a:10", "b"], "progress": "a/1", "offline": "hold"})
+    assert lights.configured == [
+        ([ControllerSpec("a", 10), ControllerSpec("b", None)], ProgressSpec.parse("a/1"), True)
+    ]
+    assert not hasattr(engine, "configured")
+
+
+def test_service_invalid_patch_applies_and_saves_nothing(tmp_path):
+    svc, engine, lights, built = _service(tmp_path)
+    with pytest.raises(SettingsError) as e:
+        svc.update({"series": "f1", "controllers": ["a"]})
+    assert e.value.field == "series"
+    assert svc.get() == Settings()
+    assert not (tmp_path / "s.json").exists()
+    assert built == [] and not hasattr(lights, "configured")
+
+
+def test_service_saves_and_clears_warning(tmp_path):
+    svc, *_ = _service(tmp_path, warning="bad file")
+    svc.update({"offline": "hold"})
+    assert load(tmp_path / "s.json") == (Settings(offline="hold"), None)
+    assert svc.warning is None
+
+
+def test_service_save_failure_still_applies_and_warns(tmp_path, monkeypatch):
+    import track_glow.settings as mod
+
+    def boom(path, settings):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(mod, "save", boom)
+    svc, engine, lights, built = _service(tmp_path)
+    assert svc.update({"series": "truck"}).series == "truck"
+    assert svc.get().series == "truck"
+    assert svc.warning == "Applied, but couldn't save settings: disk full"

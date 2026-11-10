@@ -30,6 +30,14 @@ class FakeEngine:
     def set_override(self, flag: Flag | None) -> None:
         self.state = replace(self.state, override=flag)
 
+    def set_mode(self, mode: str) -> None:
+        if mode not in ("on", "paused", "blackout"):
+            raise ValueError(mode)
+        self.state = replace(self.state, mode=mode)
+
+    def configure(self, source, follow, kind) -> None:
+        self.configured = getattr(self, "configured", []) + [(source, follow, kind)]
+
     def start(self) -> None:
         self.started = True
 
@@ -65,6 +73,9 @@ class FakeLights:
 
     def bar_status(self):
         return self.bar
+
+    def configure(self, specs, progress=None, offline_hold=False) -> None:
+        self.configured = getattr(self, "configured", []) + [(specs, progress, offline_hold)]
 
     def start(self) -> None:
         self.started = True

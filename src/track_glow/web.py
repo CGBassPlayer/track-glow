@@ -1,12 +1,13 @@
-from typing import Any, Literal, Protocol
+from typing import Annotated, Any, Literal, Protocol
 
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from fastapi import Body, FastAPI, HTTPException
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
 from track_glow import __version__
 from track_glow.engine import EngineState, status_text
 from track_glow.models import Flag
+from track_glow.settings import SettingsError
 
 FlagKey = Literal[tuple(f.key for f in Flag)]  # type: ignore[valid-type]
 
@@ -14,6 +15,7 @@ FlagKey = Literal[tuple(f.key for f in Flag)]  # type: ignore[valid-type]
 class EngineLike(Protocol):
     def snapshot(self) -> EngineState: ...
     def set_override(self, flag: Flag | None) -> None: ...
+    def set_mode(self, mode: str) -> None: ...
     def stop(self) -> None: ...
 
 
@@ -25,6 +27,17 @@ class LightsLike(Protocol):
 
 class OverrideRequest(BaseModel):
     flag: FlagKey | None  # type: ignore[valid-type]
+
+
+class ModeRequest(BaseModel):
+    mode: Literal["on", "paused", "blackout"]
+
+
+class SettingsLike(Protocol):
+    warning: str | None
+
+    def get(self) -> Any: ...
+    def update(self, patch: dict) -> Any: ...
 
 
 def state_json(state: EngineState) -> dict[str, Any]:
@@ -48,6 +61,7 @@ def state_json(state: EngineState) -> dict[str, Any]:
         "waiting_for_series": state.waiting_for_series.label if state.waiting_for_series else None,
         "override": state.override.key if state.override else None,
         "source": state.source_kind,
+        "mode": state.mode,
         "status": status_text(state),
     }
 
@@ -194,7 +208,9 @@ def progress_json(lights: LightsLike | None) -> dict[str, Any] | None:
     }
 
 
-def create_app(engine: EngineLike, lights: LightsLike | None = None) -> FastAPI:
+def create_app(
+    engine: EngineLike, lights: LightsLike | None = None, settings: SettingsLike | None = None
+) -> FastAPI:
     app = FastAPI(title="Track Glow", version=__version__)
 
     @app.get("/", response_class=HTMLResponse)
@@ -217,6 +233,32 @@ def create_app(engine: EngineLike, lights: LightsLike | None = None) -> FastAPI:
     def frame() -> dict[str, Any]:
         pixels = lights.frame() if lights is not None else b""
         return {"pixels": pixels.hex(), "led_count": len(pixels) // 3}
+
+    def settings_json() -> dict[str, Any]:
+        return {"settings": settings.get().to_dict(), "warning": settings.warning}
+
+    @app.get("/api/settings")
+    def get_settings() -> dict[str, Any]:
+        if settings is None:
+            raise HTTPException(404)
+        return settings_json()
+
+    @app.patch("/api/settings")
+    def patch_settings(patch: Annotated[Any, Body()]) -> Any:
+        if settings is None:
+            raise HTTPException(404)
+        if not isinstance(patch, dict):
+            return JSONResponse({"field": "", "error": "Expected a JSON object"}, 422)
+        try:
+            settings.update(patch)
+        except SettingsError as e:
+            return JSONResponse({"field": e.field, "error": e.message}, 422)
+        return settings_json()
+
+    @app.post("/api/mode")
+    def mode(req: ModeRequest) -> dict[str, Any]:
+        engine.set_mode(req.mode)
+        return {**state_json(engine.snapshot()), "lights": lights_json(lights)}
 
     @app.post("/api/override")
     def override(req: OverrideRequest) -> dict[str, Any]:

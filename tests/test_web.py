@@ -49,6 +49,7 @@ def test_state_green_cup(green_engine):
         "waiting_for_series": None,
         "override": None,
         "source": "live",
+        "mode": "on",
         "status": "GREEN · Cup · Lap 112/267",
         "lights": [],
         "progress": None,
@@ -137,3 +138,67 @@ def test_state_progress_null_without_lights(fake_engine):
 def test_page_shows_bar_status(fake_engine):
     html = client(fake_engine).get("/").text
     assert "s.progress" in html and "Bar " in html
+
+
+def _settings_client(tmp_path, fake_engine, warning=None):
+    from conftest import FakeLights
+
+    from track_glow.settings import Settings, SettingsService
+
+    lights = FakeLights()
+    svc = SettingsService(
+        tmp_path / "s.json",
+        Settings(),
+        fake_engine,
+        lights,
+        build_source=lambda k, f: None,
+        warning=warning,
+    )
+    return TestClient(create_app(fake_engine, lights, svc))
+
+
+def test_get_settings_with_warning(tmp_path, fake_engine):
+    r = _settings_client(tmp_path, fake_engine, warning="bad file").get("/api/settings").json()
+    assert r["warning"] == "bad file"
+    assert r["settings"]["series"] == "cup" and r["settings"]["controllers"] == []
+
+
+def test_patch_settings_ok(tmp_path, fake_engine):
+    c = _settings_client(tmp_path, fake_engine)
+    r = c.patch("/api/settings", json={"controllers": ["10.0.0.5:60"], "progress": "0-10"})
+    assert r.status_code == 200
+    assert r.json()["settings"]["controllers"] == ["10.0.0.5:60"]
+    assert c.get("/api/settings").json()["settings"]["progress"] == "0-10"
+
+
+def test_patch_settings_invalid_422(tmp_path, fake_engine):
+    r = _settings_client(tmp_path, fake_engine).patch(
+        "/api/settings", json={"controllers": ["x:abc"]}
+    )
+    assert r.status_code == 422
+    body = r.json()
+    assert body["field"] == "controllers" and "x:abc" in body["error"]
+
+
+def test_patch_settings_unknown_key_422(tmp_path, fake_engine):
+    r = _settings_client(tmp_path, fake_engine).patch("/api/settings", json={"nope": 1})
+    assert r.status_code == 422 and r.json()["field"] == "nope"
+
+
+def test_patch_settings_non_object_422(tmp_path, fake_engine):
+    r = _settings_client(tmp_path, fake_engine).patch("/api/settings", json=[1])
+    assert r.status_code == 422
+
+
+def test_settings_404_without_service(fake_engine):
+    c = client(fake_engine)
+    assert c.get("/api/settings").status_code == 404
+    assert c.patch("/api/settings", json={}).status_code == 404
+
+
+def test_post_mode(fake_engine):
+    c = client(fake_engine)
+    r = c.post("/api/mode", json={"mode": "blackout"})
+    assert r.status_code == 200 and r.json()["mode"] == "blackout"
+    assert c.get("/api/state").json()["mode"] == "blackout"
+    assert c.post("/api/mode", json={"mode": "disco"}).status_code == 422
