@@ -118,6 +118,16 @@ docker build -t track-glow .
 docker run -d --network host -v track-glow-config:/config --restart unless-stopped track-glow
 ```
 
+For a Raspberry Pi (64-bit OS), build the arm64 image on an x86 machine under QEMU and copy it over:
+
+```sh
+docker run --privileged --rm tonistiigi/binfmt --install arm64   # once per boot
+docker buildx build --platform linux/arm64 -t track-glow:arm64 --load .
+docker save track-glow:arm64 | ssh pi docker load
+```
+
+Or build directly on the Pi with `docker compose up -d --build`.
+
 The web UI and API have no login: anyone on your network can change the settings, including the
 Home Assistant URL. Run Track Glow only on a LAN you trust; on a host with several networks, bind it
 to one with `--host <lan-ip>`.
