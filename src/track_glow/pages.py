@@ -42,6 +42,7 @@ _CSS = """
   .ctl .host { flex: 1 1 9rem; width: auto; min-width: 0; }
   .ctl .leds { flex: none; width: 6rem; }
   .ctl button:disabled { opacity: .4; cursor: default; }
+  @media (max-width: 30rem) { .ctl .up { margin-left: 1.65rem; } }
   #add-controller { justify-self: start; }
   .err { color: var(--err); font-size: .85rem; min-height: 0; }
   #warning { background: var(--warn-bg); border-color: var(--line); }
