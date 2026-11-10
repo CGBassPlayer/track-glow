@@ -298,14 +298,17 @@ def test_ha_test_ok_and_error(tmp_path, fake_engine, monkeypatch):
                 raise HaError(Fake.fail)
 
         def list_scenes(self):
-            return ["scene.a", "scene.b"]
+            return [{"id": "scene.a", "name": "A"}, {"id": "scene.b", "name": "B"}]
 
         def close(self):
             pass
 
     monkeypatch.setattr(web, "HaClient", Fake)
     c, _ = _ha_client(tmp_path, fake_engine, Settings(ha_url="http://ha:8123", ha_token="t"))
-    assert c.post("/api/ha/test").json() == {"ok": True, "scenes": ["scene.a", "scene.b"]}
+    assert c.post("/api/ha/test").json() == {
+        "ok": True,
+        "scenes": [{"id": "scene.a", "name": "A"}, {"id": "scene.b", "name": "B"}],
+    }
     assert made == [("http://ha:8123", "t", True)]
     Fake.fail = "Home Assistant rejected the access token"
     assert c.post("/api/ha/test").json() == {

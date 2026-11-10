@@ -32,12 +32,23 @@ class HaClient:
     def turn_on_scene(self, entity: str) -> None:
         self._request("POST", "/api/services/scene/turn_on", json={"entity_id": entity})
 
-    def list_scenes(self) -> list[str]:
+    def list_scenes(self) -> list[dict[str, str]]:
         states = self._json(self._request("GET", "/api/states"))
         if not isinstance(states, list):
             raise HaError(_BAD_REPLY)
-        ids = (s.get("entity_id") for s in states if isinstance(s, dict))
-        return sorted(i for i in ids if isinstance(i, str) and i.startswith("scene."))
+        scenes = []
+        for s in states:
+            if not isinstance(s, dict):
+                continue
+            entity = s.get("entity_id")
+            if not isinstance(entity, str) or not entity.startswith("scene."):
+                continue
+            attrs = s.get("attributes")
+            name = attrs.get("friendly_name") if isinstance(attrs, dict) else None
+            scenes.append(
+                {"id": entity, "name": name if isinstance(name, str) and name else entity}
+            )
+        return sorted(scenes, key=lambda s: (s["name"].casefold(), s["id"]))
 
     def check(self) -> None:
         self._json(self._request("GET", "/api/"))
