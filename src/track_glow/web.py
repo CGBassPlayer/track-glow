@@ -162,6 +162,7 @@ INDEX_HTML = """<!doctype html>
       </select>
       <span class="err" data-err="offline"></span></label>
     <button type="submit">Save</button> <span id="saved" class="muted"></span>
+    <span id="form-err" class="err"></span>
   </form>
 </main>
 <script>
@@ -194,7 +195,9 @@ async function refresh() {
     disconnected("Track Glow not reachable");
   }
 }
+let lastWarning = null;
 function showSettings(body) {
+  lastWarning = body.warning;
   const w = document.getElementById("warning");
   w.hidden = !body.warning;
   w.textContent = body.warning || "";
@@ -215,10 +218,15 @@ async function loadSettings() {
 async function patchSettings(patch, errEl) {
   document.querySelectorAll("[data-err]").forEach(e => e.textContent = "");
   document.getElementById("controls-err").textContent = "";
+  document.getElementById("form-err").textContent = "";
   const r = await fetch("/api/settings", {
     method: "PATCH", headers: {"content-type": "application/json"},
     body: JSON.stringify(patch)});
-  const body = await r.json();
+  let body;
+  try { body = await r.json(); } catch (e) {
+    errEl.textContent = "Track Glow error (HTTP " + r.status + ")";
+    return false;
+  }
   if (r.ok) { showSettings(body); refresh(); return true; }
   const target = document.querySelector('[data-err="' + body.field + '"]') || errEl;
   target.textContent = body.error;
@@ -253,8 +261,8 @@ document.getElementById("settings-form").onsubmit = async e => {
     .split("\\n").map(l => l.trim()).filter(Boolean);
   const progress = document.getElementById("progress").value.trim() || null;
   const ok = await patchSettings({controllers, progress,
-    offline: document.getElementById("offline").value}, document.getElementById("saved"));
-  document.getElementById("saved").textContent = ok ? "Saved" : "";
+    offline: document.getElementById("offline").value}, document.getElementById("form-err"));
+  document.getElementById("saved").textContent = ok && !lastWarning ? "Saved" : "";
   if (ok) refreshLights();
 };
 refresh();

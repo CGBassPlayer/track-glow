@@ -312,3 +312,39 @@ def test_service_save_failure_still_applies_and_warns(tmp_path, monkeypatch):
     assert svc.update({"series": "truck"}).series == "truck"
     assert svc.get().series == "truck"
     assert svc.warning == "Applied, but couldn't save settings: disk full"
+
+
+def test_hosts_compared_case_insensitively():
+    with pytest.raises(SettingsError, match="more than once"):
+        Settings().merged({"controllers": ["A", "a:5"]})
+    assert Settings().merged({"controllers": ["A:5"], "progress": "a/1"}).progress == "a/1"
+
+
+def test_empty_controller_rejected():
+    with pytest.raises(SettingsError) as e:
+        Settings().merged({"controllers": [""]})
+    assert e.value.field == "controllers"
+
+
+def test_merged_ignores_version():
+    s = Settings(series="truck")
+    assert s.merged(s.to_dict()) == s
+
+
+def test_service_moves_bad_file_aside_before_first_save(tmp_path):
+    path = tmp_path / "s.json"
+    path.write_text('{"controllers": ["10.0.0.5:60",]}')
+    settings, warning = load(path)
+    svc, *_ = _service(tmp_path, settings=settings, warning=warning)
+    svc.update({"source": "replay"})
+    assert (tmp_path / "s.json.bad").read_text() == '{"controllers": ["10.0.0.5:60",]}'
+    assert load(path)[0].source == "replay"
+    assert svc.warning == f"Your old settings file was invalid; it was kept as {path}.bad"
+    svc.update({"series": "truck"})
+    assert svc.warning is None
+
+
+def test_service_noop_patch_does_not_save(tmp_path):
+    svc, *_ = _service(tmp_path)
+    svc.update({})
+    assert not (tmp_path / "s.json").exists()

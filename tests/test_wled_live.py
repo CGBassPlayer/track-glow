@@ -148,3 +148,10 @@ def test_offline_without_hold_is_amber():
     engine.state = EngineState(feed=FeedStatus("offline"))
     step(out, sender, 0.1)
     assert out.frame() == solid(20, OFFLINE)
+
+
+def test_override_wins_over_offline():
+    engine = FakeEngine(EngineState(feed=FeedStatus("offline"), override=Flag.RED))
+    out, sender = make(["a:20"], engine=engine)
+    step(out, sender, 0.0)
+    assert out.frame() == flag_frame(Flag.RED, 20, 0.0)

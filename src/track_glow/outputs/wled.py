@@ -195,6 +195,8 @@ class WledOutput(Output):
             scene = None
         elif state.mode == "blackout":
             scene = ("blackout",)
+        elif state.override is not None:
+            scene = ("flag", state.override)
         elif state.feed.health == "offline":
             held = offline_hold and self._last_flag_scene is not None
             scene = self._last_flag_scene if held else ("offline",)

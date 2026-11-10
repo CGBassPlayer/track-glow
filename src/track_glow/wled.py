@@ -12,6 +12,9 @@ class WledError(Exception):
     pass
 
 
+MAX_LEDS = 10000
+
+
 @dataclass
 class ControllerSpec:
     host: str
@@ -20,14 +23,17 @@ class ControllerSpec:
     @classmethod
     def parse(cls, text: str) -> "ControllerSpec":
         host, sep, count = text.partition(":")
+        host = host.strip().lower()
+        if not host:
+            raise ValueError(f"Missing host in {text!r}")
         if not sep:
             return cls(host)
         try:
             led_count = int(count)
         except ValueError:
             raise ValueError(f"Bad LED count in {text!r}") from None
-        if led_count <= 0:
-            raise ValueError(f"LED count must be positive in {text!r}")
+        if not 0 < led_count <= MAX_LEDS:
+            raise ValueError(f"LED count must be 1-{MAX_LEDS} in {text!r}")
         return cls(host, led_count)
 
 
@@ -41,6 +47,7 @@ class ProgressSpec:
     @classmethod
     def parse(cls, text: str) -> "ProgressSpec":
         host, sep, segment = text.rpartition("/")
+        host = host.strip().lower()
         if sep:
             if not host:
                 raise ValueError(f"Empty host in {text!r}")

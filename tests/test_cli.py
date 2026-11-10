@@ -216,3 +216,13 @@ def test_duplicate_wled_host_exit_2(calls, capsys):
     assert main(["--headless", "--wled", "a", "--wled", "a:5"]) == 2
     assert calls == []
     assert "--wled: " in capsys.readouterr().err
+
+
+def test_wled_override_drops_saved_segment_bar_of_missing_host(calls, settings_file, capsys):
+    from track_glow.settings import Settings, save
+
+    save(settings_file, Settings(controllers=("a:30",), progress="a/1"))
+    assert main(["--headless", "--wled", "b:30"]) == 0
+    assert calls[1] == ("lights", [("b", 30)])
+    assert calls.service.get().progress is None
+    assert "Ignoring saved progress bar a/1" in capsys.readouterr().err

@@ -142,6 +142,16 @@ def run(
         patch["source"] = "replay"
     if wled:
         patch["controllers"] = wled
+        saved_bar = settings.progress_spec()
+        if progress is None and saved_bar is not None and saved_bar.host is not None:
+            hosts = {w.partition(":")[0].strip().lower() for w in wled}
+            if saved_bar.host not in hosts:
+                print(
+                    f"Ignoring saved progress bar {settings.progress} for this run: "
+                    f"{saved_bar.host} isn't in --wled",
+                    file=sys.stderr,
+                )
+                patch["progress"] = None
     if progress is not None:
         patch["progress"] = progress
     try:

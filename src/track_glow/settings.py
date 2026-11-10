@@ -46,6 +46,7 @@ class Settings:
 
     def merged(self, patch: dict) -> "Settings":
         known = {f.name for f in fields(self)}
+        patch = {k: v for k, v in patch.items() if k != "version"}
         for key in patch:
             if key not in known:
                 raise SettingsError(key, f"Unknown setting {key}")
@@ -161,6 +162,7 @@ class SettingsService:
         self._lights = lights
         self._build_source = build_source
         self._warning = warning
+        self._bad_file = warning is not None
         self._lock = threading.Lock()
 
     def get(self) -> Settings:
@@ -176,6 +178,8 @@ class SettingsService:
         with self._lock:
             old = self._settings
             new = old.merged(patch)
+            if new == old:
+                return old
             if (new.series, new.source) != (old.series, old.source):
                 follow = follow_of(new.series)
                 self._engine.configure(self._build_source(new.source, follow), follow, new.source)
@@ -189,8 +193,14 @@ class SettingsService:
                 )
             self._settings = new
             try:
+                if self._bad_file and self._path.exists():
+                    os.replace(self._path, f"{self._path}.bad")
+                    self._bad_file = False
+                    kept = f"Your old settings file was invalid; it was kept as {self._path}.bad"
+                else:
+                    kept = None
                 save(self._path, new)
-                self._warning = None
+                self._warning = kept
             except OSError as e:
                 self._warning = f"Applied, but couldn't save settings: {e.strerror or e}"
             return new

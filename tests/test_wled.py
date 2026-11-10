@@ -145,3 +145,20 @@ def test_fetch_segment_unreachable():
 def test_fetch_segment_http_error():
     with pytest.raises(WledError, match=r"^WLED at 10\.0\.0\.5 returned HTTP 500$"):
         fetch_segment("10.0.0.5", 1, client=_client(lambda request: httpx2.Response(500)))
+
+
+def test_controller_led_count_capped():
+    assert ControllerSpec.parse("a:10000").led_count == 10000
+    with pytest.raises(ValueError, match="10000"):
+        ControllerSpec.parse("a:10001")
+
+
+def test_controller_host_trimmed_lowercased_and_required():
+    assert ControllerSpec.parse(" WLED.Local :5") == ControllerSpec("wled.local", 5)
+    for bad in ("", "  ", ":5"):
+        with pytest.raises(ValueError, match="host"):
+            ControllerSpec.parse(bad)
+
+
+def test_progress_host_lowercased():
+    assert ProgressSpec.parse("WLED.local/1").host == "wled.local"

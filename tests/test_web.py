@@ -212,3 +212,8 @@ def test_page_has_controls_and_settings_form(fake_engine):
         assert f'"key": "{flag}"' in html
     for mode in ("on", "paused", "blackout"):
         assert f'data-mode="{mode}"' in html
+
+
+def test_page_only_says_saved_without_warning(fake_engine):
+    html = client(fake_engine).get("/").text
+    assert 'ok && !lastWarning ? "Saved"' in html
