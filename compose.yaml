@@ -5,5 +5,9 @@ services:
     # Host networking: DDP to LAN WLED controllers and *.local names need the host network.
     network_mode: host
     volumes:
-      - ./config:/config
+      # Named volume: Docker seeds it from the image's /config, owned by the container user.
+      - config:/config
     restart: unless-stopped
+
+volumes:
+  config:

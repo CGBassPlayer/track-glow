@@ -267,3 +267,46 @@ def test_python_dash_m_entry():
         timeout=30,
     )
     assert r.returncode == 0 and r.stdout.strip() == f"track-glow {__version__}"
+
+
+def test_headless_exits_cleanly_on_sigterm(tmp_path):
+    import signal
+    import subprocess
+    import time
+    import urllib.request
+
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    env = {**__import__("os").environ, "TRACK_GLOW_CONFIG": str(tmp_path / "s.json")}
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "track_glow",
+            "--headless",
+            "--replay",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+        ],
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        deadline = time.monotonic() + 15
+        while True:
+            try:
+                urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=1)
+                break
+            except OSError:
+                assert time.monotonic() < deadline, "server never came up"
+                time.sleep(0.1)
+        t0 = time.monotonic()
+        proc.send_signal(signal.SIGTERM)
+        assert proc.wait(timeout=5) == 0
+        assert time.monotonic() - t0 < 3
+    finally:
+        proc.kill()

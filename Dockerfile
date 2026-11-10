@@ -5,8 +5,11 @@ COPY --from=uv /uv /usr/local/bin/uv
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never
 WORKDIR /app
 COPY pyproject.toml uv.lock README.md ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-editable --no-install-project
 COPY src ./src
-RUN uv sync --frozen --no-dev --no-editable
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-editable
 
 FROM python:3.13-slim
 RUN useradd --system --create-home --uid 10001 trackglow \

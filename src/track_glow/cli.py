@@ -1,5 +1,6 @@
 import logging
 import os
+import signal
 import sys
 import time
 from enum import StrEnum
@@ -40,6 +41,11 @@ class SeriesChoice(StrEnum):
 app = typer.Typer(add_completion=False, pretty_exceptions_enable=False)
 
 
+def _interrupt(signum, frame) -> None:
+    # Docker and systemd stop with SIGTERM; route it through the same cleanup as Ctrl-C.
+    raise KeyboardInterrupt
+
+
 def _print_version(value: bool) -> None:
     if value:
         print(f"track-glow {__version__}")
@@ -63,6 +69,7 @@ def _run_headless(
     logging.getLogger("httpx2").setLevel(logging.WARNING)
     if settings is not None and settings.warning:
         log.warning("%s", settings.warning)
+    signal.signal(signal.SIGTERM, _interrupt)
     srv = WebServer(host, port, engine, lights, settings)
     srv.start()
     log.info("Track Glow web UI: %s", srv.url)

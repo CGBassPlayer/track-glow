@@ -108,14 +108,19 @@ docker compose up -d --build        # builds the image, serves the web UI on por
 ```
 
 `compose.yaml` uses host networking, because Track Glow sends DDP to WLED controllers on your LAN
-and `*.local` names don't resolve from a bridged container. Settings live in `./config` (mounted
-at `/config`). The image has no Qt, runs as a non-root user, and has a healthcheck on
+and `*.local` names don't resolve from a bridged container. Settings live in the named volume
+`config` (mounted at `/config`); use a named volume rather than a host folder, because the
+container runs as a non-root user that can't write to a root-owned bind mount. The image has no Qt, runs as a non-root user, and has a healthcheck on
 `/api/health`. Without compose:
 
 ```sh
 docker build -t track-glow .
-docker run -d --network host -v "$PWD/config:/config" --restart unless-stopped track-glow
+docker run -d --network host -v track-glow-config:/config --restart unless-stopped track-glow
 ```
+
+The web UI and API have no login: anyone on your network can change the settings, including the
+Home Assistant URL. Run Track Glow only on a LAN you trust; on a host with several networks, bind it
+to one with `--host <lan-ip>`.
 
 ### Desktop app (PyInstaller)
 

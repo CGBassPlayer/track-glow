@@ -12,6 +12,7 @@ def test_dockerignore_is_allow_list_without_secrets():
     assert lines[0] == "*"
     allowed = {line[1:] for line in lines if line.startswith("!")}
     assert allowed == {"pyproject.toml", "uv.lock", "README.md", "src"}
+    assert "**/__pycache__" in lines
 
 
 def test_dockerfile_runs_headless_as_non_root_with_config_volume():
@@ -24,7 +25,8 @@ def test_dockerfile_runs_headless_as_non_root_with_config_volume():
 
 def test_compose_uses_host_network_and_config_volume():
     text = (ROOT / "compose.yaml").read_text()
-    assert "network_mode: host" in text and "./config:/config" in text
+    assert "network_mode: host" in text and "config:/config" in text
+    assert "./config" not in text, "bind mounts aren't writable by the container user"
 
 
 def test_pyinstaller_spec_builds_console_app_from_main():
