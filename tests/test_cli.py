@@ -15,6 +15,17 @@ from track_glow.sources.replay import ReplaySource
 
 
 @pytest.fixture(autouse=True)
+def settings_file(monkeypatch, tmp_path):
+    path = tmp_path / "settings.json"
+    monkeypatch.setenv("TRACK_GLOW_CONFIG", str(path))
+    return path
+
+
+class Calls(list):
+    service = None
+
+
+@pytest.fixture(autouse=True)
 def no_engine_thread(monkeypatch):
     monkeypatch.setattr(Engine, "start", lambda self: None)
     monkeypatch.setattr(WledOutput, "start", lambda self: None)
@@ -22,13 +33,14 @@ def no_engine_thread(monkeypatch):
 
 @pytest.fixture
 def calls(monkeypatch):
-    recorded = []
+    recorded = Calls()
 
     def record(mode):
-        def run(engine, h, p, lights=None):
+        def run(engine, h, p, lights=None, settings=None):
             snap = engine.snapshot()
             recorded.append((mode, h, p, snap.source_kind, snap.follow))
-            if lights is not None:
+            recorded.service = settings
+            if lights is not None and lights.status():
                 recorded.append(("lights", [(c.host, c.led_count) for c in lights.status()]))
                 recorded.append(("bar", lights.bar_status().state != "off"))
             return 0
@@ -161,10 +173,46 @@ def test_no_progress_means_bar_off(calls):
 def test_bad_progress_exit_2(calls, capsys):
     assert main(["--headless", "--wled", "10.0.0.5:60", "--progress", "20-10"]) == 2
     assert calls == []
-    assert "Invalid --progress value" in capsys.readouterr().err
+    assert "--progress: Invalid progress value" in capsys.readouterr().err
 
 
 def test_progress_without_wled_exit_2(calls, capsys):
     assert main(["--headless", "--progress", "10-20"]) == 2
     assert calls == []
-    assert "--progress needs at least one --wled controller" in capsys.readouterr().err
+    assert "--progress: Progress bar needs at least one controller" in capsys.readouterr().err
+
+
+def test_settings_file_used_without_flags(calls, settings_file):
+    from track_glow.settings import Settings, save
+
+    save(settings_file, Settings(series="truck", source="replay", controllers=("10.0.0.5:60",)))
+    assert main(["--headless"]) == 0
+    assert calls[0] == ("headless", "0.0.0.0", 8780, "replay", Series.TRUCK)
+    assert calls[1] == ("lights", [("10.0.0.5", 60)])
+    assert calls.service.get().series == "truck"
+    assert calls.service.warning is None
+
+
+def test_flags_override_file_for_this_run_only(calls, settings_file):
+    from track_glow.settings import Settings, load, save
+
+    saved = Settings(series="truck", controllers=("10.0.0.5:60",))
+    save(settings_file, saved)
+    assert main(["--headless", "--series", "xfinity", "--wled", "10.0.0.9:30"]) == 0
+    assert calls[0][4] == Series.XFINITY
+    assert calls[1] == ("lights", [("10.0.0.9", 30)])
+    assert load(settings_file) == (saved, None)
+
+
+def test_corrupt_settings_file_starts_with_warning(calls, settings_file):
+    settings_file.write_text("{nope")
+    assert main(["--headless"]) == 0
+    assert calls[0] == ("headless", "0.0.0.0", 8780, "live", Series.CUP)
+    assert "invalid" in calls.service.warning
+    assert settings_file.read_text() == "{nope"
+
+
+def test_duplicate_wled_host_exit_2(calls, capsys):
+    assert main(["--headless", "--wled", "a", "--wled", "a:5"]) == 2
+    assert calls == []
+    assert "--wled: " in capsys.readouterr().err

@@ -202,3 +202,13 @@ def test_post_mode(fake_engine):
     assert r.status_code == 200 and r.json()["mode"] == "blackout"
     assert c.get("/api/state").json()["mode"] == "blackout"
     assert c.post("/api/mode", json={"mode": "disco"}).status_code == 422
+
+
+def test_page_has_controls_and_settings_form(fake_engine):
+    html = client(fake_engine).get("/").text
+    for hook in ('id="controls"', 'id="settings-form"', "/api/mode", '"PATCH"', 'id="warning"'):
+        assert hook in html, hook
+    for flag in ("green", "yellow", "red", "white", "checkered"):
+        assert f'"key": "{flag}"' in html
+    for mode in ("on", "paused", "blackout"):
+        assert f'data-mode="{mode}"' in html

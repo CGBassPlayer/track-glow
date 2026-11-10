@@ -215,3 +215,26 @@ def test_lights_line_includes_bar(qtbot):
     )
     qtbot.addWidget(w)
     assert w.lights_label.text() == "Lights: 1/1 ok · Bar 25%"
+
+
+def test_lights_line_hidden_with_zero_controllers(qtbot):
+    from conftest import FakeLights
+
+    from track_glow.outputs.wled import ControllerStatus
+
+    lights = FakeLights()
+    lights.statuses = []
+    w = LauncherWindow(
+        FakeEngine(),
+        "127.0.0.1",
+        8780,
+        FakeServer,
+        opened.append,
+        tray_available=False,
+        lights=lights,
+    )
+    qtbot.addWidget(w)
+    assert w.lights_label.isHidden()
+    lights.statuses = [ControllerStatus("10.0.0.5", 60, "ok")]
+    w.refresh_status()
+    assert not w.lights_label.isHidden()

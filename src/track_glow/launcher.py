@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 
 from track_glow.engine import status_text
 from track_glow.server import ServerStartError, WebServer
-from track_glow.web import EngineLike, LightsLike
+from track_glow.web import EngineLike, LightsLike, SettingsLike
 
 APP_NAME = "Track Glow"
 TRAY_COLOR = "#2e7d32"
@@ -45,11 +45,14 @@ class LauncherWindow(QMainWindow):
         open_url: Callable[[str], object] = open_in_browser,
         tray_available: bool | None = None,
         lights: LightsLike | None = None,
+        settings: SettingsLike | None = None,
     ):
         super().__init__()
         self._engine = engine
         self._lights = lights
-        self._server_factory = server_factory or (lambda h, p: WebServer(h, p, engine, lights))
+        self._server_factory = server_factory or (
+            lambda h, p: WebServer(h, p, engine, lights, settings)
+        )
         self._open_url = open_url
         self._server: WebServer | None = None
         if tray_available is None:
@@ -106,7 +109,7 @@ class LauncherWindow(QMainWindow):
         layout = QVBoxLayout()
         layout.addLayout(status_row)
         self.lights_label = QLabel()
-        self.lights_label.setHidden(lights is None)
+        self.lights_label.setHidden(lights is None or not lights.status())
         layout.addWidget(self.lights_label)
         layout.addLayout(address_row)
         layout.addWidget(self.url_label)
@@ -147,6 +150,7 @@ class LauncherWindow(QMainWindow):
         if self.tray is not None:
             self.tray.setToolTip(f"{APP_NAME} · {text}")
         if self._lights is not None:
+            self.lights_label.setHidden(not self._lights.status())
             self.lights_label.setText(
                 lights_summary(self._lights.status(), self._lights.bar_status())
             )
@@ -218,10 +222,16 @@ def lights_summary(statuses: list, bar=None) -> str:
     return f"{text} · Bar: {bar.message}"
 
 
-def run_launcher(engine: EngineLike, host: str, port: int, lights: LightsLike | None = None) -> int:
+def run_launcher(
+    engine: EngineLike,
+    host: str,
+    port: int,
+    lights: LightsLike | None = None,
+    settings: SettingsLike | None = None,
+) -> int:
     app = QApplication.instance() or QApplication([])
     app.setApplicationName(APP_NAME)
     app.setQuitOnLastWindowClosed(False)
-    window = LauncherWindow(engine, host, port, lights=lights)
+    window = LauncherWindow(engine, host, port, lights=lights, settings=settings)
     window.show()
     return app.exec()

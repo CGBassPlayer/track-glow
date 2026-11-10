@@ -22,12 +22,31 @@ The launcher lets you pick the bind address (this computer only, or all interfac
 then opens the web UI in your browser. If your desktop has no system tray, **Hide to tray**
 minimizes the window instead.
 
+### Setup and controls (web UI)
+
+Everything else is set up in the web UI and applies immediately, with no restart:
+
+- **Controls:** fire a test flag (stays until **Clear**), **On / Pause / Blackout** (Pause hands
+  the lights back to WLED; Blackout keeps them dark), **Live / Replay**, and the followed series.
+  Test flag and Pause/Blackout aren't saved: a restart comes back on, with no test flag.
+- **Setup:** WLED controllers, the lap progress bar, and what to show when the feed goes offline
+  (dim amber, or hold the last flag).
+
+Settings are saved to `settings.json` in your OS config folder (on Linux
+`~/.config/track-glow/settings.json`), or to the path in `TRACK_GLOW_CONFIG`. The file is written
+owner-only. If it can't be read, Track Glow starts with defaults, leaves the file alone, and shows a
+warning until you save.
+
+The `--series`, `--replay`, `--wled` and `--progress` flags override the saved settings for one run
+and don't change the file, unless you then save from the web UI.
+
 Race data comes from NASCAR's public live feed (`cf.nascar.com/live/feeds/live-feed.json`),
 polled every 3 seconds. The feed carries one race at a time, so `--series` is a filter: with
 `--series xfinity` and a Cup race live, status reads "Waiting for Xfinity". After 3 failed polls the
-feed is marked offline; polling backs off to 30 seconds and recovers on its own. `GET /api/state`
-returns the current state as JSON; `POST /api/override {"flag": "red"}` forces a flag
-(`{"flag": null}` clears it).
+feed is marked offline; polling backs off to 30 seconds and recovers on its own. API:
+`GET /api/state` returns the current state as JSON; `POST /api/override {"flag": "red"}` forces a
+flag (`{"flag": null}` clears it); `POST /api/mode {"mode": "on"|"paused"|"blackout"}`;
+`GET /api/settings` and `PATCH /api/settings` (partial JSON) read and change settings.
 
 ### WLED
 
@@ -63,5 +82,5 @@ it. A headless-only install doesn't.
 
 ## Status
 
-Milestone 4: WLED output (spanned, synced, with web preview) and lap progress bar. No Home
-Assistant yet.
+Milestone 5: WLED output (spanned, synced, with web preview), lap progress bar, and web setup
+and controls with a settings file. No Home Assistant yet.

@@ -8,17 +8,22 @@ from typing import Annotated
 import typer
 
 from track_glow.engine import Engine, status_text
-from track_glow.models import Series
 from track_glow.outputs.wled import WledOutput
 from track_glow.server import ServerStartError, WebServer
+from track_glow.settings import SettingsError, SettingsService, default_path, follow_of, load
 from track_glow.sources import build_source
-from track_glow.wled import ControllerSpec, ProgressSpec
 
 DEFAULT_PORT = 8780
 DESKTOP_EXTRA_HINT = (
     "Desktop mode needs the desktop extra: install track-glow[desktop], or run with --headless"
 )
 NO_DISPLAY_HINT = "No display found: run with --headless"
+FLAG_FOR_FIELD = {
+    "series": "--series",
+    "source": "--replay",
+    "controllers": "--wled",
+    "progress": "--progress",
+}
 
 log = logging.getLogger(__name__)
 
@@ -39,10 +44,18 @@ def has_display() -> bool:
     return any(os.environ.get(v) for v in ("DISPLAY", "WAYLAND_DISPLAY", "QT_QPA_PLATFORM"))
 
 
-def _run_headless(engine: Engine, host: str, port: int, lights: WledOutput | None = None) -> int:
+def _run_headless(
+    engine: Engine,
+    host: str,
+    port: int,
+    lights: WledOutput | None = None,
+    settings: SettingsService | None = None,
+) -> int:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     logging.getLogger("httpx2").setLevel(logging.WARNING)
-    srv = WebServer(host, port, engine, lights)
+    if settings is not None and settings.warning:
+        log.warning("%s", settings.warning)
+    srv = WebServer(host, port, engine, lights, settings)
     srv.start()
     log.info("Track Glow web UI: %s", srv.url)
     last = None
@@ -61,7 +74,13 @@ def _run_headless(engine: Engine, host: str, port: int, lights: WledOutput | Non
     return 0
 
 
-def _run_desktop(engine: Engine, host: str, port: int, lights: WledOutput | None = None) -> int:
+def _run_desktop(
+    engine: Engine,
+    host: str,
+    port: int,
+    lights: WledOutput | None = None,
+    settings: SettingsService | None = None,
+) -> int:
     if not has_display():
         print(NO_DISPLAY_HINT, file=sys.stderr)
         return 1
@@ -74,7 +93,7 @@ def _run_desktop(engine: Engine, host: str, port: int, lights: WledOutput | None
         msg = DESKTOP_EXTRA_HINT if pyside_missing else f"Can't start desktop mode: {e}"
         print(msg, file=sys.stderr)
         return 1
-    return launcher.run_launcher(engine, host, port, lights)
+    return launcher.run_launcher(engine, host, port, lights, settings)
 
 
 @app.command()
@@ -88,15 +107,19 @@ def run(
     ] = None,
     port: Annotated[int, typer.Option(min=1, max=65535, help="Web UI port.")] = DEFAULT_PORT,
     series: Annotated[
-        SeriesChoice, typer.Option(help="Series to follow; other live series are ignored.")
-    ] = SeriesChoice.cup,
-    replay: Annotated[bool, typer.Option("--replay", help="Loop a demo race.")] = False,
+        SeriesChoice | None,
+        typer.Option(help="Series to follow for this run (default: from settings, else cup)."),
+    ] = None,
+    replay: Annotated[
+        bool, typer.Option("--replay", help="Loop a demo race for this run.")
+    ] = False,
     wled: Annotated[
         list[str] | None,
         typer.Option(
             "--wled",
             metavar="HOST[:LEDS]",
-            help="WLED controller, repeatable, in strip order. LEDS skips discovery.",
+            help="WLED controller for this run, repeatable, in strip order. "
+            "LEDS skips discovery. Replaces the saved controllers.",
         ),
     ] = None,
     progress: Annotated[
@@ -110,37 +133,41 @@ def run(
 ) -> int:
     if host is None:
         host = "0.0.0.0" if headless else "127.0.0.1"
-    follow = None if series is SeriesChoice.any else Series[series.name.upper()]
-    kind = "replay" if replay else "live"
-    engine = Engine(build_source(kind, follow), follow, kind)
-    try:
-        specs = [ControllerSpec.parse(w) for w in wled or []]
-    except ValueError as e:
-        print(f"Invalid --wled value: {e}", file=sys.stderr)
-        return 2
-    bar = None
+    path = default_path()
+    settings, warning = load(path)
+    patch: dict = {}
+    if series is not None:
+        patch["series"] = series.value
+    if replay:
+        patch["source"] = "replay"
+    if wled:
+        patch["controllers"] = wled
     if progress is not None:
-        if not specs:
-            print("--progress needs at least one --wled controller", file=sys.stderr)
-            return 2
-        try:
-            bar = ProgressSpec.parse(progress)
-        except ValueError as e:
-            print(f"Invalid --progress value: {e}", file=sys.stderr)
-            return 2
-    lights = WledOutput(engine, specs, progress=bar) if specs else None
+        patch["progress"] = progress
+    try:
+        settings = settings.merged(patch)
+    except SettingsError as e:
+        print(f"{FLAG_FOR_FIELD.get(e.field, e.field)}: {e.message}", file=sys.stderr)
+        return 2
+    follow = follow_of(settings.series)
+    engine = Engine(build_source(settings.source, follow), follow, settings.source)
+    lights = WledOutput(
+        engine,
+        settings.specs(),
+        progress=settings.progress_spec(),
+        offline_hold=settings.offline == "hold",
+    )
+    service = SettingsService(path, settings, engine, lights, warning=warning)
     engine.start()
-    if lights is not None:
-        lights.start()
+    lights.start()
     try:
         runner = _run_headless if headless else _run_desktop
-        return runner(engine, host, port, lights)
+        return runner(engine, host, port, lights, service)
     except ServerStartError as e:
         print(e, file=sys.stderr)
         return 1
     finally:
-        if lights is not None:
-            lights.stop()
+        lights.stop()
         engine.stop()
 
 
