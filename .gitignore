@@ -5,3 +5,6 @@ __pycache__/
 .ruff_cache/
 dist/
 .playwright-mcp/
+
+# local secrets for manual testing
+.ha-token
