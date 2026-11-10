@@ -8,9 +8,15 @@ from typing import Literal
 
 from track_glow.ddp import DdpSender
 from track_glow.outputs import Output
-from track_glow.render import OFFLINE, flag_frame, solid
+from track_glow.render import OFFLINE, bar_color, bar_fraction, flag_frame, progress_bar, solid
 from track_glow.web import EngineLike
-from track_glow.wled import ControllerSpec, WledError, discover_led_count
+from track_glow.wled import (
+    ControllerSpec,
+    ProgressSpec,
+    WledError,
+    discover_led_count,
+    fetch_segment,
+)
 
 log = logging.getLogger(__name__)
 
@@ -27,6 +33,15 @@ class ControllerStatus:
     address: str | None = None
 
 
+@dataclass(frozen=True)
+class BarStatus:
+    state: Literal["off", "waiting", "ok", "error"]
+    message: str = ""
+    start: int | None = None
+    stop: int | None = None
+    fraction: float = 0.0
+
+
 class WledOutput(Output):
     def __init__(
         self,
@@ -39,6 +54,8 @@ class WledOutput(Output):
         tick: float = 0.02,
         keepalive: float = 1.0,
         retry: float = 3.0,
+        progress: ProgressSpec | None = None,
+        fetch_segment: Callable[[str, int], tuple[int, int]] = fetch_segment,
     ):
         self._engine = engine
         self._sender = sender or DdpSender()
@@ -59,6 +76,22 @@ class WledOutput(Output):
         self._seq = 0
         self._stop = threading.Event()
         self._threads: list[threading.Thread] = []
+        self._progress = progress
+        self._fetch_segment = fetch_segment
+        self._segment: tuple[int, int] | None = None
+        self._segment_error = ""
+        self._segment_attempt = float("-inf")
+        self._bar_controller: int | None = None
+        self._bar_config_error = ""
+        if progress is not None and progress.host is not None:
+            hosts = [s.host for s in specs]
+            if progress.host in hosts:
+                self._bar_controller = hosts.index(progress.host)
+            else:
+                self._bar_config_error = f"Progress host {progress.host} is not a --wled controller"
+        self._bar = BarStatus("off") if progress is None else BarStatus("waiting")
+        if self._bar_config_error:
+            self._bar = BarStatus("error", self._bar_config_error)
 
     def status(self) -> list[ControllerStatus]:
         with self._lock:
@@ -68,7 +101,31 @@ class WledOutput(Output):
         with self._lock:
             return self._frame
 
+    def bar_status(self) -> BarStatus:
+        with self._lock:
+            return self._bar
+
     def discover_pending(self, now: float) -> None:
+        self._discover_controllers(now)
+        self._discover_segment(now)
+
+    def _discover_segment(self, now: float) -> None:
+        i = self._bar_controller
+        if i is None or self._segment is not None or self._stop.is_set():
+            return
+        if self.status()[i].state != "ok" or now - self._segment_attempt < self._retry:
+            return
+        started = self._clock()
+        try:
+            segment = self._fetch_segment(self._progress.host, self._progress.segment)
+            error = ""
+        except WledError as e:
+            segment, error = None, str(e)
+        self._segment_attempt = now + (self._clock() - started)
+        with self._lock:
+            self._segment, self._segment_error = segment, error
+
+    def _discover_controllers(self, now: float) -> None:
         for i, s in enumerate(self.status()):
             if s.state == "ok" or self._stop.is_set():
                 continue
@@ -103,14 +160,19 @@ class WledOutput(Output):
             self._scene = scene
             self._changed_at = now
 
+        bar = self._resolve_bar(live, n, state)
         if n == 0 or scene is None:
             frame = b""
         elif scene[0] == "offline":
             frame = solid(n, OFFLINE)
         else:
             frame = flag_frame(scene[1], n, now - self._changed_at)
+            if bar.state == "ok":
+                pixels = progress_bar(bar.stop - bar.start, bar.fraction, bar_color(scene[1]))
+                frame = frame[: 3 * bar.start] + pixels + frame[3 * bar.stop :]
         with self._lock:
             self._frame = frame
+            self._bar = bar
         if not frame:
             self._last_sent_frame = None
             return
@@ -127,6 +189,40 @@ class WledOutput(Output):
             start = end
         self._last_sent_frame = frame
         self._last_sent = now
+
+    def _resolve_bar(self, live: list[ControllerStatus], n: int, state) -> BarStatus:
+        spec = self._progress
+        if spec is None:
+            return BarStatus("off")
+        if self._bar_config_error:
+            return BarStatus("error", self._bar_config_error)
+        if spec.host is None:
+            start, stop = spec.start, spec.stop
+        else:
+            controller = self.status()[self._bar_controller]
+            with self._lock:
+                segment, error = self._segment, self._segment_error
+            if controller.state != "ok":
+                return BarStatus("waiting", f"Waiting for {spec.host}")
+            if error:
+                return BarStatus("error", error)
+            if segment is None:
+                return BarStatus("waiting", f"Reading segment {spec.segment} on {spec.host}")
+            offset = 0
+            for c in live:
+                if c.host == spec.host:
+                    break
+                offset += c.led_count
+            start, stop = offset + segment[0], offset + segment[1]
+        if n == 0:
+            return BarStatus("waiting", "No controllers")
+        if not 0 <= start < stop <= n:
+            return BarStatus("error", f"Progress range {start}-{stop} is outside the {n}-LED strip")
+        race = state.race
+        fraction = bar_fraction(
+            state.flag, race.lap if race else None, race.laps_in_race if race else None
+        )
+        return BarStatus("ok", "", start, stop, fraction)
 
     def start(self) -> None:
         if any(t.is_alive() for t in self._threads):

@@ -31,7 +31,7 @@ class RecordingSender:
         self.closed = True
 
 
-def make(specs, engine=None, discover=None, sender=None, resolve=None):
+def make(specs, engine=None, discover=None, sender=None, resolve=None, **kw):
     sender = sender or RecordingSender()
     out = WledOutput(
         engine or FakeEngine(green_state()),
@@ -40,6 +40,7 @@ def make(specs, engine=None, discover=None, sender=None, resolve=None):
         discover=discover or (lambda host: pytest.fail(f"unexpected discovery of {host}")),
         resolve=resolve or (lambda host: host),
         clock=lambda: sender.now,
+        **kw,
     )
     return out, sender
 
