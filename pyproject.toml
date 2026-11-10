@@ -1,0 +1,46 @@
+[project]
+name = "track-glow"
+version = "0.1.0"
+description = "Sync your home lights with the flag in a live race"
+readme = "README.md"
+authors = [
+    { name = "Ryan Goodwin", email = "goodwinryan2@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.162.2",
+    "uvicorn>=0.54.0",
+]
+
+[project.scripts]
+track-glow = "track_glow.cli:main"
+
+[project.optional-dependencies]
+desktop = [
+    "pyside6-essentials>=6.12.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.9.7,<0.10.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "httpx2>=2.16.0",
+    "pytest>=9.2.0",
+    "pytest-qt>=4.5.0",
+    "ruff>=0.17.4",
+    "track-glow[desktop]",
+]
+
+[tool.uv.sources]
+track-glow = { workspace = true }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
