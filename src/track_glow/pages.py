@@ -275,7 +275,6 @@ SETTINGS_HTML = _page(
       <input id="ha-verify" type="checkbox" style="width:auto"> Verify TLS certificate</label>
     <div class="row"><button type="button" id="ha-test">Test connection</button>
       <span id="ha-test-result" class="muted"></span></div>
-    <datalist id="ha-scene-list"></datalist>
     <div id="ha-scenes"></div>
     <span class="err" data-err="ha_scenes"></span>
     <button type="submit">Save</button> <span id="saved" class="muted"></span>
@@ -283,12 +282,39 @@ SETTINGS_HTML = _page(
   </form>""",
     """
 const SCENES = __SCENES__;
+let haScenes = [];
+function sceneName(id) {
+  const s = haScenes.find(s => s.id === id);
+  return s ? s.name : id;
+}
 async function refresh() {
   let ha = null;
   try { ha = (await (await fetch("/api/state")).json()).home_assistant; } catch (e) { return; }
   document.getElementById("ha-status").textContent = !ha || ha.state === "off"
-    ? "Off" : ha.state === "ok" ? "OK · last scene " + ha.scene
+    ? "Off" : ha.state === "ok" ? "OK · last scene " + sceneName(ha.scene)
     : ha.state + (ha.message ? " — " + ha.message : "");
+}
+function sceneOption(value, text) {
+  const o = document.createElement("option");
+  o.value = value;
+  o.textContent = text;
+  return o;
+}
+// A saved scene HA doesn't list (renamed, deleted, or HA unreachable) stays selectable.
+function selectScene(sel, id) {
+  if (id && ![...sel.options].some(o => o.value === id)) sel.append(sceneOption(id, id));
+  sel.value = id;
+}
+function fillSceneOptions(scenes) {
+  haScenes = scenes;
+  const shared = name => scenes.filter(s => s.name === name).length > 1;
+  SCENES.forEach(([key]) => {
+    const sel = document.getElementById("scene-" + key);
+    const keep = sel.value;
+    sel.replaceChildren(sceneOption("", "None"), ...scenes.map(s =>
+      sceneOption(s.id, shared(s.name) ? s.name + " (" + s.id + ")" : s.name)));
+    selectScene(sel, keep);
+  });
 }
 function showSettings(body) {
   return showWarning(body);
@@ -302,9 +328,9 @@ function fillForm(st) {
   document.getElementById("ha-token").placeholder =
     st.ha_token_set ? "saved — leave empty to keep" : "";
   document.getElementById("ha-verify").checked = st.ha_verify_tls;
-  SCENES.forEach(([key]) => {
-    document.getElementById("scene-" + key).value = st.ha_scenes[key] || "";
-  });
+  SCENES.forEach(([key]) =>
+    selectScene(document.getElementById("scene-" + key), st.ha_scenes[key] || ""));
+  if (st.ha_url && st.ha_token_set) loadScenes();
 }
 async function loadSettings() {
   const r = await fetch("/api/settings");
@@ -314,14 +340,13 @@ const sceneBox = document.getElementById("ha-scenes");
 SCENES.forEach(([key, label]) => {
   const l = document.createElement("label");
   l.append(label + " scene");
-  const i = document.createElement("input");
-  i.id = "scene-" + key;
-  i.setAttribute("list", "ha-scene-list");
-  i.spellcheck = false;
-  l.append(i);
+  const sel = document.createElement("select");
+  sel.id = "scene-" + key;
+  sel.append(sceneOption("", "None"));
+  l.append(sel);
   sceneBox.append(l);
 });
-document.getElementById("ha-test").onclick = async () => {
+async function loadScenes() {
   const out = document.getElementById("ha-test-result");
   out.textContent = "Testing…";
   let r;
@@ -334,10 +359,10 @@ document.getElementById("ha-test").onclick = async () => {
   }
   if (!r.ok) { out.textContent = r.error; return; }
   out.textContent = "Connected · " + r.scenes.length + " scenes";
-  const list = document.getElementById("ha-scene-list");
-  list.replaceChildren(...r.scenes.map(s => { const o = document.createElement("option");
-    o.value = s; return o; }));
-};
+  fillSceneOptions(r.scenes);
+  refresh();
+}
+document.getElementById("ha-test").onclick = loadScenes;
 document.getElementById("settings-form").onsubmit = async e => {
   e.preventDefault();
   const controllers = document.getElementById("controllers").value
@@ -347,7 +372,7 @@ document.getElementById("settings-form").onsubmit = async e => {
     ha_url: document.getElementById("ha-url").value.trim(),
     ha_verify_tls: document.getElementById("ha-verify").checked,
     ha_scenes: Object.fromEntries(SCENES.map(([key]) =>
-      [key, document.getElementById("scene-" + key).value.trim()]))};
+      [key, document.getElementById("scene-" + key).value]))};
   const token = document.getElementById("ha-token").value.trim();
   if (token) patch.ha_token = token;
   const ok = await patchSettings(patch, document.getElementById("form-err"));

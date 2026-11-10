@@ -349,3 +349,21 @@ def test_page_has_home_assistant_card(fake_engine):
 def test_page_ha_test_handles_errors(fake_engine):
     html = client(fake_engine).get("/settings").text
     assert 'out.textContent = "Test failed' in html
+
+
+def test_scene_pickers_are_selects(fake_engine):
+    html = client(fake_engine).get("/settings").text
+    assert 'createElement("select")' in html
+    for gone in ("<datalist", 'list="', 'setAttribute("list"'):
+        assert gone not in html, gone
+
+
+def test_scene_picker_keeps_unknown_saved_id(fake_engine):
+    html = client(fake_engine).get("/settings").text
+    assert "fillSceneOptions" in html
+    assert '" (" + s.id + ")"' in html
+
+
+def test_settings_autoloads_scenes(fake_engine):
+    html = client(fake_engine).get("/settings").text
+    assert "st.ha_url && st.ha_token_set" in html and "loadScenes()" in html
