@@ -99,7 +99,36 @@ the URL to turn Home Assistant off.
 The desktop launcher needs the `desktop` extra (PySide6). The repo's dev dependencies include
 it. A headless-only install doesn't.
 
+## Install and run
+
+### Docker (headless server)
+
+```sh
+docker compose up -d --build        # builds the image, serves the web UI on port 8780
+```
+
+`compose.yaml` uses host networking, because Track Glow sends DDP to WLED controllers on your LAN
+and `*.local` names don't resolve from a bridged container. Settings live in `./config` (mounted
+at `/config`). The image has no Qt, runs as a non-root user, and has a healthcheck on
+`/api/health`. Without compose:
+
+```sh
+docker build -t track-glow .
+docker run -d --network host -v "$PWD/config:/config" --restart unless-stopped track-glow
+```
+
+### Desktop app (PyInstaller)
+
+```sh
+uv run pyinstaller packaging/track-glow.spec --noconfirm   # -> dist/track-glow/track-glow
+```
+
+This builds a one-folder app for the OS you run it on (build on Windows for Windows, on macOS
+for macOS). The same executable runs the launcher, or `--headless`. `track-glow --version` and
+`python -m track_glow` also work.
+
 ## Status
 
-Milestone 6: WLED output (spanned, synced, with web preview), lap progress bar, web setup and
-controls with a settings file, and Home Assistant scenes.
+Milestone 7: WLED output (spanned, synced, with web preview), lap progress bar, web setup and
+controls with a settings file, Home Assistant scenes, and Docker / PyInstaller packaging. Not yet
+validated on real WLED hardware.
