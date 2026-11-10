@@ -28,16 +28,21 @@ _CSS = """
   .row { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-bottom: .75rem; }
   .row:last-child { margin-bottom: 0; }
   .row > span { min-width: 5.5rem; color: var(--muted); font-size: .9rem; }
-  button, select, input, textarea { font: inherit; color: var(--fg); background: var(--bg);
+  button, select, input { font: inherit; color: var(--fg); background: var(--bg);
     border: 1px solid var(--line); border-radius: 6px; padding: .35rem .7rem; }
   button { cursor: pointer; }
   button[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg);
                                 border-color: var(--accent); }
   button .dot { display: inline-block; width: .7rem; height: .7rem; border-radius: 50%;
                 margin-right: .35rem; vertical-align: -1px; border: 1px solid var(--line); }
-  label { display: grid; gap: .3rem; margin-bottom: .75rem; font-size: .9rem; }
-  textarea { min-height: 4.5rem; font-family: ui-monospace, monospace; }
-  input, textarea, select { width: 100%; box-sizing: border-box; }
+  label, .field { display: grid; gap: .3rem; margin-bottom: .75rem; font-size: .9rem; }
+  input, select { width: 100%; box-sizing: border-box; }
+  .ctl { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; margin-bottom: .4rem; }
+  .ctl .num { width: 1.25rem; color: var(--muted); }
+  .ctl .host { flex: 1 1 9rem; width: auto; min-width: 0; }
+  .ctl .leds { flex: none; width: 6rem; }
+  .ctl button:disabled { opacity: .4; cursor: default; }
+  #add-controller { justify-self: start; }
   .err { color: var(--err); font-size: .85rem; min-height: 0; }
   #warning { background: var(--warn-bg); border-color: var(--line); }
 """
@@ -251,9 +256,10 @@ SETTINGS_HTML = _page(
     "/settings",
     """  <form id="settings-form" class="card">
     <h2>WLED</h2>
-    <label>WLED controllers, one per line, in strip order (HOST or HOST:LEDS)
-      <textarea id="controllers" spellcheck="false"></textarea>
-      <span class="err" data-err="controllers"></span></label>
+    <div class="field">WLED controllers, in strip order (empty LEDs = auto-detect)
+      <div id="controllers"></div>
+      <button type="button" id="add-controller">+ Add controller</button>
+      <span class="err" data-err="controllers"></span></div>
     <label>Lap progress bar (START-STOP or HOST/SEG, empty for none)
       <input id="progress" spellcheck="false">
       <span class="err" data-err="progress"></span></label>
@@ -287,6 +293,42 @@ function sceneName(id) {
   const s = haScenes.find(s => s.id === id);
   return s ? s.name : id;
 }
+const controllerBox = document.getElementById("controllers");
+function controllerRow(host, leds) {
+  const row = document.createElement("div");
+  row.className = "ctl";
+  row.innerHTML = '<span class="num"></span>' +
+    '<input class="host" placeholder="10.0.0.5 or wled.local" spellcheck="false"' +
+    ' aria-label="Host">' +
+    '<input class="leds" type="number" min="1" placeholder="auto" aria-label="LEDs">' +
+    '<button type="button" class="up" aria-label="Move up">↑</button>' +
+    '<button type="button" class="down" aria-label="Move down">↓</button>' +
+    '<button type="button" class="del" aria-label="Remove">✕</button>';
+  row.querySelector(".host").value = host;
+  row.querySelector(".leds").value = leds;
+  return row;
+}
+function renumber() {
+  const rows = [...controllerBox.children];
+  rows.forEach((row, i) => {
+    row.querySelector(".num").textContent = i + 1;
+    row.querySelector(".up").disabled = i === 0;
+    row.querySelector(".down").disabled = i === rows.length - 1;
+  });
+}
+controllerBox.onclick = e => {
+  const row = e.target.closest(".ctl");
+  const btn = e.target.closest("button");
+  if (!row || !btn) return;
+  if (btn.classList.contains("up")) row.previousElementSibling?.before(row);
+  else if (btn.classList.contains("down")) row.nextElementSibling?.after(row);
+  else row.remove();
+  renumber();
+};
+document.getElementById("add-controller").onclick = () => {
+  controllerBox.append(controllerRow("", ""));
+  renumber();
+};
 async function refresh() {
   let ha = null;
   try { ha = (await (await fetch("/api/state")).json()).home_assistant; } catch (e) { return; }
@@ -320,7 +362,11 @@ function showSettings(body) {
   return showWarning(body);
 }
 function fillForm(st) {
-  document.getElementById("controllers").value = st.controllers.join("\\n");
+  controllerBox.replaceChildren(...st.controllers.map(c => {
+    const i = c.indexOf(":");
+    return i < 0 ? controllerRow(c, "") : controllerRow(c.slice(0, i), c.slice(i + 1));
+  }));
+  renumber();
   document.getElementById("progress").value = st.progress || "";
   document.getElementById("offline").value = st.offline;
   document.getElementById("ha-url").value = st.ha_url;
@@ -365,8 +411,11 @@ async function loadScenes() {
 document.getElementById("ha-test").onclick = loadScenes;
 document.getElementById("settings-form").onsubmit = async e => {
   e.preventDefault();
-  const controllers = document.getElementById("controllers").value
-    .split("\\n").map(l => l.trim()).filter(Boolean);
+  const controllers = [...controllerBox.children]
+    .map(r => ({host: r.querySelector(".host").value.trim(),
+                leds: r.querySelector(".leds").value.trim()}))
+    .filter(c => c.host)
+    .map(c => c.leds ? c.host + ":" + c.leds : c.host);
   const progress = document.getElementById("progress").value.trim() || null;
   const patch = {controllers, progress, offline: document.getElementById("offline").value,
     ha_url: document.getElementById("ha-url").value.trim(),
