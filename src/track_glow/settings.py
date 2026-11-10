@@ -63,7 +63,7 @@ class Settings:
 
     def merged(self, patch: dict) -> "Settings":
         known = {f.name for f in fields(self)}
-        patch = {k: v for k, v in patch.items() if k != "version"}
+        patch = {k: v for k, v in patch.items() if k not in ("version", "ha_token_set")}
         for key in patch:
             if key not in known:
                 raise SettingsError(key, f"Unknown setting {key}")
@@ -221,7 +221,7 @@ class SettingsService:
         self._settings = settings
         self._engine = engine
         self._lights = lights
-        self._ha = ha
+        self.ha = ha
         self._build_source = build_source
         self._warning = warning
         self._bad_file = warning is not None
@@ -253,10 +253,10 @@ class SettingsService:
                 self._lights.configure(
                     new.specs(), progress=new.progress_spec(), offline_hold=new.offline == "hold"
                 )
-            if self._ha is not None and any(
+            if self.ha is not None and any(
                 getattr(new, f) != getattr(old, f) for f in (*_HA_FIELDS, "offline")
             ):
-                self._ha.configure(
+                self.ha.configure(
                     url=new.ha_url,
                     token=new.ha_token,
                     verify_tls=new.ha_verify_tls,

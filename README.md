@@ -46,7 +46,8 @@ polled every 3 seconds. The feed carries one race at a time, so `--series` is a 
 feed is marked offline; polling backs off to 30 seconds and recovers on its own. API:
 `GET /api/state` returns the current state as JSON; `POST /api/override {"flag": "red"}` forces a
 flag (`{"flag": null}` clears it); `POST /api/mode {"mode": "on"|"paused"|"blackout"}`;
-`GET /api/settings` and `PATCH /api/settings` (partial JSON) read and change settings.
+`GET /api/settings` and `PATCH /api/settings` (partial JSON) read and change settings;
+`POST /api/ha/test` checks the saved Home Assistant connection.
 
 ### WLED
 
@@ -77,10 +78,28 @@ strip keeps showing the flag. Give either:
 Both use WLED's own convention: LEDs are numbered from 0 and the stop is exclusive (WLED's
 segment "Stop" field). The bar's status shows next to the lights in the web UI and launcher.
 
+### Home Assistant
+
+Track Glow can also trigger a Home Assistant scene on each change. Set it up in the web UI under
+**Setup → Home Assistant**:
+
+1. In Home Assistant, open your profile → **Security** → **Long-lived access tokens** → **Create
+   token**.
+2. Enter the HA URL (e.g. `http://homeassistant.local:8123`) and the token, then **Save**.
+3. **Test connection** checks the token and lists your scenes.
+4. Pick a scene for each state you want: one per flag, plus **No race**, **Feed offline** and
+   **Blackout**. States without a scene are skipped. Then **Save**.
+
+Each scene is triggered once when the state changes (no flashing on the HA side) and retried every
+5 s if HA can't be reached. **Pause** leaves Home Assistant alone. With "hold the last flag", a feed
+outage doesn't trigger the offline scene. The token is stored only in the owner-only settings file:
+the web UI and API never send it back, and leaving the token field empty keeps the saved one. Clear
+the URL to turn Home Assistant off.
+
 The desktop launcher needs the `desktop` extra (PySide6). The repo's dev dependencies include
 it. A headless-only install doesn't.
 
 ## Status
 
-Milestone 5: WLED output (spanned, synced, with web preview), lap progress bar, and web setup
-and controls with a settings file. No Home Assistant yet.
+Milestone 6: WLED output (spanned, synced, with web preview), lap progress bar, web setup and
+controls with a settings file, and Home Assistant scenes.

@@ -8,6 +8,7 @@ from typing import Annotated
 import typer
 
 from track_glow.engine import Engine, status_text
+from track_glow.outputs.ha import HomeAssistantOutput
 from track_glow.outputs.wled import WledOutput
 from track_glow.server import ServerStartError, WebServer
 from track_glow.settings import SettingsError, SettingsService, default_path, follow_of, load
@@ -167,9 +168,18 @@ def run(
         progress=settings.progress_spec(),
         offline_hold=settings.offline == "hold",
     )
-    service = SettingsService(path, settings, engine, lights, warning=warning)
+    ha = HomeAssistantOutput(engine)
+    ha.configure(
+        url=settings.ha_url,
+        token=settings.ha_token,
+        verify_tls=settings.ha_verify_tls,
+        scenes=dict(settings.ha_scenes),
+        offline_hold=settings.offline == "hold",
+    )
+    service = SettingsService(path, settings, engine, lights, warning=warning, ha=ha)
     engine.start()
     lights.start()
+    ha.start()
     try:
         runner = _run_headless if headless else _run_desktop
         return runner(engine, host, port, lights, service)
@@ -177,6 +187,7 @@ def run(
         print(e, file=sys.stderr)
         return 1
     finally:
+        ha.stop()
         lights.stop()
         engine.stop()
 

@@ -53,6 +53,7 @@ def test_state_green_cup(green_engine):
         "status": "GREEN · Cup · Lap 112/267",
         "lights": [],
         "progress": None,
+        "home_assistant": None,
     }
 
 
@@ -217,3 +218,103 @@ def test_page_has_controls_and_settings_form(fake_engine):
 def test_page_only_says_saved_without_warning(fake_engine):
     html = client(fake_engine).get("/").text
     assert 'ok && !lastWarning ? "Saved"' in html
+
+
+class _FakeHa:
+    def __init__(self):
+        from track_glow.outputs.ha import HaStatus
+
+        self.st = HaStatus("ok", "", "scene.green")
+        self.configured = []
+
+    def ha_status(self):
+        return self.st
+
+    def configure(self, **kw):
+        self.configured.append(kw)
+
+
+def _ha_client(tmp_path, fake_engine, settings=None):
+    from conftest import FakeLights
+
+    from track_glow.settings import Settings, SettingsService
+
+    svc = SettingsService(
+        tmp_path / "s.json",
+        settings or Settings(),
+        fake_engine,
+        FakeLights(),
+        build_source=lambda k, f: None,
+        ha=_FakeHa(),
+    )
+    return TestClient(create_app(fake_engine, FakeLights(), svc)), svc
+
+
+def test_state_includes_home_assistant(tmp_path, fake_engine):
+    c, _ = _ha_client(tmp_path, fake_engine)
+    assert c.get("/api/state").json()["home_assistant"] == {
+        "state": "ok",
+        "message": "",
+        "scene": "scene.green",
+    }
+    assert client(fake_engine).get("/api/state").json()["home_assistant"] is None
+
+
+def test_settings_never_return_token(tmp_path, fake_engine):
+    from track_glow.settings import Settings
+
+    c, svc = _ha_client(
+        tmp_path, fake_engine, Settings(ha_url="http://ha:8123", ha_token="s3cret-tkn")
+    )
+    r = c.get("/api/settings")
+    assert "s3cret-tkn" not in r.text
+    assert r.json()["settings"]["ha_token_set"] is True
+    r = c.patch("/api/settings", json={"ha_url": "http://ha2:8123", "ha_token": ""})
+    assert r.status_code == 200 and "s3cret-tkn" not in r.text
+    assert svc.get().ha_token == "s3cret-tkn"
+    assert "s3cret-tkn" not in c.get("/api/state").text
+
+
+def test_ha_test_not_configured(tmp_path, fake_engine):
+    c, _ = _ha_client(tmp_path, fake_engine)
+    assert c.post("/api/ha/test").json() == {"ok": False, "error": "Set the URL and token first"}
+
+
+def test_ha_test_ok_and_error(tmp_path, fake_engine, monkeypatch):
+    import track_glow.web as web
+    from track_glow.ha import HaError
+    from track_glow.settings import Settings
+
+    made = []
+
+    class Fake:
+        fail = None
+
+        def __init__(self, url, token, verify_tls=True):
+            made.append((url, token, verify_tls))
+
+        def check(self):
+            if Fake.fail:
+                raise HaError(Fake.fail)
+
+        def list_scenes(self):
+            return ["scene.a", "scene.b"]
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(web, "HaClient", Fake)
+    c, _ = _ha_client(tmp_path, fake_engine, Settings(ha_url="http://ha:8123", ha_token="t"))
+    assert c.post("/api/ha/test").json() == {"ok": True, "scenes": ["scene.a", "scene.b"]}
+    assert made == [("http://ha:8123", "t", True)]
+    Fake.fail = "Home Assistant rejected the access token"
+    assert c.post("/api/ha/test").json() == {
+        "ok": False,
+        "error": "Home Assistant rejected the access token",
+    }
+
+
+def test_page_has_home_assistant_card(fake_engine):
+    html = client(fake_engine).get("/").text
+    for hook in ('id="ha-url"', 'id="ha-token"', "/api/ha/test", "<datalist", 'id="ha-scenes"'):
+        assert hook in html, hook

@@ -29,6 +29,9 @@ class Calls(list):
 def no_engine_thread(monkeypatch):
     monkeypatch.setattr(Engine, "start", lambda self: None)
     monkeypatch.setattr(WledOutput, "start", lambda self: None)
+    from track_glow.outputs.ha import HomeAssistantOutput
+
+    monkeypatch.setattr(HomeAssistantOutput, "start", lambda self: None)
 
 
 @pytest.fixture
@@ -226,3 +229,20 @@ def test_wled_override_drops_saved_segment_bar_of_missing_host(calls, settings_f
     assert calls[1] == ("lights", [("b", 30)])
     assert calls.service.get().progress is None
     assert "Ignoring saved progress bar a/1" in capsys.readouterr().err
+
+
+def test_home_assistant_built_from_settings_and_stopped(calls, settings_file, monkeypatch):
+    from track_glow.outputs.ha import HomeAssistantOutput
+    from track_glow.settings import Settings, save
+
+    stopped = []
+    monkeypatch.setattr(HomeAssistantOutput, "stop", lambda self: stopped.append(self))
+    save(
+        settings_file,
+        Settings(ha_url="http://ha:8123", ha_token="t", ha_scenes={"green": "scene.g"}),
+    )
+    assert main(["--headless"]) == 0
+    ha = calls.service.ha
+    assert ha.ha_status().state == "idle"
+    assert ha._config.url == "http://ha:8123" and dict(ha._config.scenes) == {"green": "scene.g"}
+    assert stopped == [ha]

@@ -7,8 +7,9 @@ from pydantic import BaseModel
 
 from track_glow import __version__
 from track_glow.engine import EngineState, status_text
+from track_glow.ha import HaClient, HaError
 from track_glow.models import Flag
-from track_glow.settings import SettingsError
+from track_glow.settings import SCENE_LABELS, SettingsError
 
 FLAG_BUTTONS = [
     {"key": f.key, "short": f.label.split(" · ")[0].title(), "color": f.color} for f in Flag
@@ -161,12 +162,28 @@ INDEX_HTML = """<!doctype html>
         <option value="hold">Hold the last flag</option>
       </select>
       <span class="err" data-err="offline"></span></label>
+    <h2>Home Assistant</h2>
+    <p id="ha-status" class="muted"></p>
+    <label>URL (e.g. http://homeassistant.local:8123, empty to turn off)
+      <input id="ha-url" spellcheck="false">
+      <span class="err" data-err="ha_url"></span></label>
+    <label>Long-lived access token
+      <input id="ha-token" type="password" autocomplete="off" spellcheck="false">
+      <span class="err" data-err="ha_token"></span></label>
+    <label style="display:flex;gap:.5rem;align-items:center">
+      <input id="ha-verify" type="checkbox" style="width:auto"> Verify TLS certificate</label>
+    <div class="row"><button type="button" id="ha-test">Test connection</button>
+      <span id="ha-test-result" class="muted"></span></div>
+    <datalist id="ha-scene-list"></datalist>
+    <div id="ha-scenes"></div>
+    <span class="err" data-err="ha_scenes"></span>
     <button type="submit">Save</button> <span id="saved" class="muted"></span>
     <span id="form-err" class="err"></span>
   </form>
 </main>
 <script>
 const FLAGS = __FLAGS__;
+const SCENES = __SCENES__;
 function disconnected(reason) {
   document.getElementById("status").textContent = "Not connected";
   document.getElementById("swatch").style.background = "#9e9e9e";
@@ -190,6 +207,10 @@ async function refresh() {
     document.getElementById("feed").textContent =
       s.feed.message ? feed + " — " + s.feed.message : feed;
     press("data-mode", s.mode);
+    const ha = s.home_assistant;
+    document.getElementById("ha-status").textContent = !ha || ha.state === "off"
+      ? "Off" : ha.state === "ok" ? "OK · last scene " + ha.scene
+      : ha.state + (ha.message ? " — " + ha.message : "");
     press("data-flag", s.override || "");
   } catch (e) {
     disconnected("Track Glow not reachable");
@@ -210,6 +231,14 @@ function fillForm(st) {
   document.getElementById("controllers").value = st.controllers.join("\\n");
   document.getElementById("progress").value = st.progress || "";
   document.getElementById("offline").value = st.offline;
+  document.getElementById("ha-url").value = st.ha_url;
+  document.getElementById("ha-token").value = "";
+  document.getElementById("ha-token").placeholder =
+    st.ha_token_set ? "saved — leave empty to keep" : "";
+  document.getElementById("ha-verify").checked = st.ha_verify_tls;
+  SCENES.forEach(([key]) => {
+    document.getElementById("scene-" + key).value = st.ha_scenes[key] || "";
+  });
 }
 async function loadSettings() {
   const r = await fetch("/api/settings");
@@ -237,6 +266,27 @@ async function post(url, payload) {
                     body: JSON.stringify(payload)});
   refresh();
 }
+const sceneBox = document.getElementById("ha-scenes");
+SCENES.forEach(([key, label]) => {
+  const l = document.createElement("label");
+  l.append(label + " scene");
+  const i = document.createElement("input");
+  i.id = "scene-" + key;
+  i.setAttribute("list", "ha-scene-list");
+  i.spellcheck = false;
+  l.append(i);
+  sceneBox.append(l);
+});
+document.getElementById("ha-test").onclick = async () => {
+  const out = document.getElementById("ha-test-result");
+  out.textContent = "Testing…";
+  const r = await (await fetch("/api/ha/test", {method: "POST"})).json();
+  if (!r.ok) { out.textContent = r.error; return; }
+  out.textContent = "Connected · " + r.scenes.length + " scenes";
+  const list = document.getElementById("ha-scene-list");
+  list.replaceChildren(...r.scenes.map(s => { const o = document.createElement("option");
+    o.value = s; return o; }));
+};
 const flagButtons = document.getElementById("flag-buttons");
 FLAGS.forEach(f => {
   const b = document.createElement("button");
@@ -260,8 +310,15 @@ document.getElementById("settings-form").onsubmit = async e => {
   const controllers = document.getElementById("controllers").value
     .split("\\n").map(l => l.trim()).filter(Boolean);
   const progress = document.getElementById("progress").value.trim() || null;
-  const ok = await patchSettings({controllers, progress,
-    offline: document.getElementById("offline").value}, document.getElementById("form-err"));
+  const patch = {controllers, progress, offline: document.getElementById("offline").value,
+    ha_url: document.getElementById("ha-url").value.trim(),
+    ha_verify_tls: document.getElementById("ha-verify").checked,
+    ha_scenes: Object.fromEntries(SCENES.map(([key]) =>
+      [key, document.getElementById("scene-" + key).value.trim()]))};
+  const token = document.getElementById("ha-token").value.trim();
+  if (token) patch.ha_token = token;
+  const ok = await patchSettings(patch, document.getElementById("form-err"));
+  if (ok) loadSettings();
   document.getElementById("saved").textContent = ok && !lastWarning ? "Saved" : "";
   if (ok) refreshLights();
 };
@@ -350,7 +407,9 @@ def create_app(
 ) -> FastAPI:
     app = FastAPI(title="Track Glow", version=__version__)
 
-    page = INDEX_HTML.replace("__FLAGS__", json.dumps(FLAG_BUTTONS))
+    page = INDEX_HTML.replace("__FLAGS__", json.dumps(FLAG_BUTTONS)).replace(
+        "__SCENES__", json.dumps(list(SCENE_LABELS.items()))
+    )
 
     @app.get("/", response_class=HTMLResponse)
     def index() -> str:
@@ -366,6 +425,7 @@ def create_app(
             **state_json(engine.snapshot()),
             "lights": lights_json(lights),
             "progress": progress_json(lights),
+            "home_assistant": ha_json(),
         }
 
     @app.get("/api/frame")
@@ -373,8 +433,15 @@ def create_app(
         pixels = lights.frame() if lights is not None else b""
         return {"pixels": pixels.hex(), "led_count": len(pixels) // 3}
 
+    def ha_json() -> dict[str, Any] | None:
+        ha = getattr(settings, "ha", None)
+        if ha is None:
+            return None
+        st = ha.ha_status()
+        return {"state": st.state, "message": st.message, "scene": st.scene}
+
     def settings_json() -> dict[str, Any]:
-        return {"settings": settings.get().to_dict(), "warning": settings.warning}
+        return {"settings": settings.get().public_dict(), "warning": settings.warning}
 
     @app.get("/api/settings")
     def get_settings() -> dict[str, Any]:
@@ -394,6 +461,22 @@ def create_app(
             return JSONResponse({"field": e.field, "error": e.message}, 422)
         return settings_json()
 
+    @app.post("/api/ha/test")
+    def ha_test() -> dict[str, Any]:
+        if settings is None:
+            raise HTTPException(404)
+        s = settings.get()
+        if not s.ha_url or not s.ha_token:
+            return {"ok": False, "error": "Set the URL and token first"}
+        client = HaClient(s.ha_url, s.ha_token, s.ha_verify_tls)
+        try:
+            client.check()
+            return {"ok": True, "scenes": client.list_scenes()}
+        except HaError as e:
+            return {"ok": False, "error": str(e)}
+        finally:
+            client.close()
+
     @app.post("/api/mode")
     def mode(req: ModeRequest) -> dict[str, Any]:
         engine.set_mode(req.mode)
@@ -406,6 +489,7 @@ def create_app(
             **state_json(engine.snapshot()),
             "lights": lights_json(lights),
             "progress": progress_json(lights),
+            "home_assistant": ha_json(),
         }
 
     return app

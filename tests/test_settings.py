@@ -523,3 +523,16 @@ def test_service_configures_ha_on_ha_or_offline_change(tmp_path):
 def test_service_without_ha_ignores_ha_changes(tmp_path):
     svc, *_ = _service(tmp_path)
     assert svc.update(_HA).ha_url == "http://ha.local:8123"
+
+
+def test_merged_ignores_ha_token_set():
+    s = Settings(ha_url="http://ha", ha_token="s3cret")
+    patch = s.public_dict()
+    assert s.merged(patch) == s
+
+
+def test_service_exposes_ha(tmp_path):
+    from track_glow.settings import SettingsService
+
+    svc = SettingsService(tmp_path / "s.json", Settings(), None, None, ha="HA")
+    assert svc.ha == "HA"
