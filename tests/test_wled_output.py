@@ -31,19 +31,22 @@ class RecordingSender:
         self.closed = True
 
 
-def make(specs, engine=None, discover=None, sender=None):
+def make(specs, engine=None, discover=None, sender=None, resolve=None):
     sender = sender or RecordingSender()
     out = WledOutput(
         engine or FakeEngine(green_state()),
         [ControllerSpec.parse(s) for s in specs],
         sender=sender,
         discover=discover or (lambda host: pytest.fail(f"unexpected discovery of {host}")),
+        resolve=resolve or (lambda host: host),
+        clock=lambda: sender.now,
     )
     return out, sender
 
 
 def step(out, sender, now):
     sender.now = now
+    out.discover_pending(now)
     out.step(now)
 
 
@@ -141,7 +144,7 @@ def test_status_before_first_step_is_connecting():
     out, _ = make(["a", "b:5"])
     assert [(s.host, s.led_count, s.state) for s in out.status()] == [
         ("a", None, "connecting"),
-        ("b", 5, "ok"),
+        ("b", 5, "connecting"),
     ]
 
 
@@ -219,3 +222,85 @@ def test_real_udp_sync():
     common = set(received["a"]) & set(received["b"])
     assert common
     assert max(abs(received["a"][s] - received["b"][s]) for s in common) < 0.02
+
+
+def test_sends_to_resolved_address_resolving_once():
+    lookups = []
+
+    def resolve(host):
+        lookups.append(host)
+        return "10.9.9.9"
+
+    out, sender = make(["wled.local:4"], resolve=resolve)
+    for now in (0.0, 0.3, 0.6, 2.0):
+        step(out, sender, now)
+    assert {s[1] for s in sender.sends} == {"10.9.9.9"}
+    assert lookups == ["wled.local"]
+    assert out.status()[0].host == "wled.local"
+
+
+def test_unresolvable_host_is_error_and_retried():
+    def resolve(host):
+        raise OSError("Name or service not known")
+
+    out, sender = make(["nope.local:4"], resolve=resolve)
+    step(out, sender, 0.0)
+    st = out.status()[0]
+    assert st.state == "error" and "nope.local" in st.message
+    assert sender.sends == []
+
+
+def _gaps(times):
+    return [b - a for a, b in zip(times, times[1:], strict=False)]
+
+
+def test_slow_discovery_does_not_stall_other_controllers():
+    def discover(host):
+        time.sleep(0.5)
+        raise WledError("timeout")
+
+    sender = RecordingSender()
+    out = WledOutput(
+        FakeEngine(green_state()),
+        [ControllerSpec("a", 12), ControllerSpec("b")],
+        sender=sender,
+        discover=discover,
+        resolve=lambda h: h,
+        retry=0.3,
+    )
+    sender.now = 0.0
+    times = []
+    sender.send = lambda host, pixels, seq: times.append(time.monotonic())
+    t0 = time.monotonic()
+    out.start()
+    time.sleep(1.5)
+    out.stop()
+    assert times and times[0] - t0 < 0.3
+    assert max(_gaps(times)) < 0.3
+
+
+def test_stop_while_discovery_blocked_sends_nothing_after():
+    release = threading.Event()
+
+    def discover(host):
+        release.wait(5)
+        raise WledError("timeout")
+
+    sender = RecordingSender()
+    out = WledOutput(
+        FakeEngine(green_state()),
+        [ControllerSpec("a", 12), ControllerSpec("b")],
+        sender=sender,
+        discover=discover,
+        resolve=lambda h: h,
+    )
+    out.start()
+    time.sleep(0.2)
+    t0 = time.monotonic()
+    out.stop()
+    assert time.monotonic() - t0 < 1
+    count = len(sender.sends)
+    release.set()
+    time.sleep(0.2)
+    assert len(sender.sends) == count
+    assert sender.closed

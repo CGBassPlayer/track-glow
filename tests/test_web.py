@@ -105,3 +105,9 @@ def test_frame_empty_without_output(fake_engine):
 def test_index_has_strip_preview(fake_engine):
     html = client(fake_engine).get("/").text
     assert 'id="strip"' in html and "/api/frame" in html
+
+
+def test_strip_preview_polls_faster_than_flash_and_never_overlaps(fake_engine):
+    html = client(fake_engine).get("/").text
+    assert "setTimeout(drawStrip, FRAME_MS)" in html and "const FRAME_MS = 100" in html
+    assert "setInterval(drawStrip" not in html

@@ -118,35 +118,45 @@ refresh();
 setInterval(refresh, 2000);
 
 const LED = 10;
-async function drawStrip() {
-  const wrap = document.getElementById("strip-wrap");
+const FRAME_MS = 100;
+let lights = [];
+async function refreshLights() {
   try {
-    const r = await fetch("/api/frame");
-    if (!r.ok) return;
-    const f = await r.json();
-    const s = await (await fetch("/api/state")).json();
-    wrap.hidden = s.lights.length === 0;
-    document.getElementById("lights").textContent = s.lights
-      .map(l => l.host + ": " + (l.state === "ok"
-        ? l.led_count + " LEDs"
-        : l.state + (l.message ? " — " + l.message : "")))
-      .join(" · ");
-    const c = document.getElementById("strip");
-    const perRow = Math.max(1, Math.floor(c.clientWidth / LED));
-    const n = f.led_count;
-    c.width = perRow * LED;
-    c.height = Math.max(1, Math.ceil(n / perRow)) * LED;
-    const g = c.getContext("2d");
-    g.fillStyle = "#000";
-    g.fillRect(0, 0, c.width, c.height);
-    for (let i = 0; i < n; i++) {
-      g.fillStyle = "#" + f.pixels.substr(i * 6, 6);
-      g.fillRect((i % perRow) * LED + 1, Math.floor(i / perRow) * LED + 1, LED - 2, LED - 2);
+    lights = (await (await fetch("/api/state")).json()).lights;
+  } catch (e) {}
+  document.getElementById("strip-wrap").hidden = lights.length === 0;
+  document.getElementById("lights").textContent = lights
+    .map(l => l.host + ": " + (l.state === "ok"
+      ? l.led_count + " LEDs"
+      : l.state + (l.message ? " — " + l.message : "")))
+    .join(" · ");
+}
+async function drawStrip() {
+  try {
+    if (lights.length) {
+      const r = await fetch("/api/frame");
+      if (r.ok) {
+        const f = await r.json();
+        const c = document.getElementById("strip");
+        const perRow = Math.max(1, Math.floor(c.clientWidth / LED));
+        const n = f.led_count;
+        c.width = perRow * LED;
+        c.height = Math.max(1, Math.ceil(n / perRow)) * LED;
+        const g = c.getContext("2d");
+        g.fillStyle = "#000";
+        g.fillRect(0, 0, c.width, c.height);
+        for (let i = 0; i < n; i++) {
+          g.fillStyle = "#" + f.pixels.substr(i * 6, 6);
+          g.fillRect((i % perRow) * LED + 1, Math.floor(i / perRow) * LED + 1, LED - 2, LED - 2);
+        }
+      }
     }
   } catch (e) {}
+  setTimeout(drawStrip, FRAME_MS);
 }
+refreshLights();
+setInterval(refreshLights, 2000);
 drawStrip();
-setInterval(drawStrip, 200);
 </script>
 </body>
 </html>
