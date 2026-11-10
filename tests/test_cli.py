@@ -2,22 +2,47 @@ import builtins
 import socket
 import sys
 
-from track_glow.cli import main, parse_args
+import pytest
+
+from track_glow import cli, launcher
+from track_glow.cli import main
 
 
-def test_defaults_desktop():
-    a = parse_args([])
-    assert (a.headless, a.host, a.port) == (False, "127.0.0.1", 8780)
+@pytest.fixture
+def calls(monkeypatch):
+    recorded = []
+    monkeypatch.setattr(cli, "has_display", lambda: True)
+    monkeypatch.setattr(cli, "_run_headless", lambda h, p: recorded.append(("headless", h, p)) or 0)
+    monkeypatch.setattr(
+        launcher, "run_launcher", lambda h, p: recorded.append(("desktop", h, p)) or 0
+    )
+    return recorded
 
 
-def test_defaults_headless():
-    a = parse_args(["--headless"])
-    assert (a.host, a.port) == ("0.0.0.0", 8780)
+def test_defaults_desktop(calls):
+    assert main([]) == 0
+    assert calls == [("desktop", "127.0.0.1", 8780)]
 
 
-def test_explicit_host_port_win():
-    a = parse_args(["--headless", "--host", "127.0.0.1", "--port", "9000"])
-    assert (a.host, a.port) == ("127.0.0.1", 9000)
+def test_defaults_headless(calls):
+    assert main(["--headless"]) == 0
+    assert calls == [("headless", "0.0.0.0", 8780)]
+
+
+def test_explicit_host_port_win(calls):
+    assert main(["--headless", "--host", "127.0.0.1", "--port", "9000"]) == 0
+    assert calls == [("headless", "127.0.0.1", 9000)]
+
+
+@pytest.mark.parametrize("port", ["0", "70000"])
+def test_port_out_of_range_rejected(calls, capsys, port):
+    assert main(["--headless", "--port", port]) == 2
+    assert calls == []
+
+
+def test_help_exits_0(capsys):
+    assert main(["--help"]) == 0
+    assert "--headless" in capsys.readouterr().out
 
 
 def fail_launcher_import(monkeypatch, error: ImportError) -> None:
