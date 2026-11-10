@@ -9,11 +9,11 @@ LAPS_IN_RACE = 80
 SCRIPT: tuple[tuple[float, Flag, int, int], ...] = (
     (6, Flag.COLD_TRACK, 0, 0),
     (6, Flag.HOT_TRACK, 0, 0),
-    (12, Flag.GREEN, 1, 24),
+    (23, Flag.GREEN, 1, 24),
     (10, Flag.YELLOW, 24, 28),
-    (10, Flag.GREEN, 28, 60),
+    (32, Flag.GREEN, 28, 60),
     (8, Flag.RED, 60, 60),
-    (8, Flag.GREEN, 60, 79),
+    (19, Flag.GREEN, 60, 79),
     (6, Flag.WHITE, 79, 80),
     (12, Flag.CHECKERED, 80, 80),
 )

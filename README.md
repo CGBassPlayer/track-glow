@@ -11,7 +11,7 @@ server, it runs headless.
 ```sh
 uv run track-glow                                         # desktop launcher (binds 127.0.0.1:8780)
 uv run track-glow --headless [--host HOST] [--port PORT]  # no window (binds 0.0.0.0:8780)
-uv run track-glow --replay                                # loop a 78-second demo race
+uv run track-glow --replay                                # loop a ~2-minute demo race
 uv run track-glow --series xfinity                        # cup (default), xfinity, truck, any
 uv run pytest                                             # run the tests
 ```
