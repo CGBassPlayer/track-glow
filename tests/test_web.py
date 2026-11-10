@@ -232,6 +232,23 @@ def test_settings_page_served(fake_engine):
     assert 'id="controls"' not in r.text
 
 
+def test_controllers_are_rows(fake_engine):
+    text = client(fake_engine).get("/settings").text
+    for hook in (
+        'id="add-controller"',
+        'placeholder="auto"',
+        'aria-label="Move up"',
+        'aria-label="Remove"',
+    ):
+        assert hook in text, hook
+    assert '<textarea id="controllers"' not in text
+
+
+def test_controllers_save_skips_blank_hosts(fake_engine):
+    text = client(fake_engine).get("/settings").text
+    assert ".filter(c => c.host)" in text
+
+
 def test_pages_follow_color_scheme(fake_engine):
     c = client(fake_engine)
     for path in ("/", "/settings"):
