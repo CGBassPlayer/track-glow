@@ -1,0 +1,9 @@
+services:
+  track-glow:
+    build: .
+    image: track-glow
+    # Host networking: DDP to LAN WLED controllers and *.local names need the host network.
+    network_mode: host
+    volumes:
+      - ./config:/config
+    restart: unless-stopped

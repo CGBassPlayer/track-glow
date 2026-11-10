@@ -1,0 +1,6 @@
+# Allow-list: only what the image build needs. Keeps local secrets (.ha-token, .ha-url) out.
+*
+!pyproject.toml
+!uv.lock
+!README.md
+!src
