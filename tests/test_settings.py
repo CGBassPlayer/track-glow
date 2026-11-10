@@ -19,6 +19,10 @@ def test_defaults_round_trip():
         "controllers": [],
         "progress": None,
         "offline": "amber",
+        "ha_url": "",
+        "ha_token": "",
+        "ha_verify_tls": True,
+        "ha_scenes": {},
     }
     assert Settings.from_dict(d) == s
 
@@ -348,3 +352,174 @@ def test_service_noop_patch_does_not_save(tmp_path):
     svc, *_ = _service(tmp_path)
     svc.update({})
     assert not (tmp_path / "s.json").exists()
+
+
+_HA = {"ha_url": "http://ha.local:8123", "ha_token": "s3cret"}
+
+
+def test_ha_defaults():
+    s = Settings()
+    assert (s.ha_url, s.ha_token, s.ha_verify_tls, s.ha_scenes) == ("", "", True, {})
+
+
+def test_scene_keys_and_labels():
+    from track_glow.models import Flag
+    from track_glow.settings import SCENE_KEYS, SCENE_LABELS
+
+    assert SCENE_KEYS == (*(f.key for f in Flag), "no_race", "offline", "blackout")
+    assert list(SCENE_LABELS) == list(SCENE_KEYS)
+    assert SCENE_LABELS["white"] == "White"
+    assert SCENE_LABELS["hot_track"] == "Hot Track"
+    assert SCENE_LABELS["no_race"] == "No race"
+    assert SCENE_LABELS["offline"] == "Feed offline"
+    assert SCENE_LABELS["blackout"] == "Blackout"
+
+
+@pytest.mark.parametrize(
+    "url,expected",
+    [
+        ("ha.local:8123", "http://ha.local:8123"),
+        ("http://ha.local:8123/", "http://ha.local:8123"),
+        ("https://ha.example.com//", "https://ha.example.com"),
+        ("  HTTPS://ha.example.com  ", "https://ha.example.com"),
+        ("http://ha.local/sub/", "http://ha.local/sub"),
+    ],
+)
+def test_ha_url_normalized(url, expected):
+    assert Settings().merged({**_HA, "ha_url": url}).ha_url == expected
+
+
+@pytest.mark.parametrize("url", ["ftp://ha.local", "http://", "http:///x", "ws://ha"])
+def test_ha_url_bad_rejected(url):
+    with pytest.raises(SettingsError) as e:
+        Settings().merged({**_HA, "ha_url": url})
+    assert e.value.field == "ha_url"
+
+
+def test_ha_url_without_token():
+    with pytest.raises(SettingsError) as e:
+        Settings().merged({"ha_url": "ha.local"})
+    assert e.value.field == "ha_token"
+    assert e.value.message == "Home Assistant needs an access token"
+
+
+def test_ha_empty_url_needs_no_token():
+    assert Settings().merged({"ha_url": "", "ha_verify_tls": False}).ha_verify_tls is False
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("ha_url", 5),
+        ("ha_token", None),
+        ("ha_verify_tls", "yes"),
+        ("ha_scenes", ["scene.x"]),
+        ("ha_scenes", {"green": 1}),
+    ],
+)
+def test_ha_bad_types(field, value):
+    with pytest.raises(SettingsError) as e:
+        Settings.from_dict({**_HA, field: value})
+    assert e.value.field == field
+
+
+def test_ha_unknown_scene_key():
+    with pytest.raises(SettingsError) as e:
+        Settings().merged({"ha_scenes": {"purple": "scene.x"}})
+    assert e.value.field == "ha_scenes"
+    assert "purple" in e.value.message
+
+
+def test_ha_scene_value_must_be_scene():
+    with pytest.raises(SettingsError) as e:
+        Settings().merged({"ha_scenes": {"green": "light.kitchen"}})
+    assert e.value.field == "ha_scenes"
+    assert "light.kitchen" in e.value.message
+
+
+def test_ha_scenes_empty_value_dropped_and_replaces_map():
+    s = Settings().merged({"ha_scenes": {"green": "scene.g", "red": "scene.r"}})
+    m = s.merged({"ha_scenes": {"green": "", "yellow": "scene.y"}})
+    assert m.ha_scenes == {"yellow": "scene.y"}
+
+
+def test_public_dict_hides_token():
+    s = Settings().merged(_HA)
+    d = s.public_dict()
+    assert d["ha_token"] == ""
+    assert d["ha_token_set"] is True
+    assert "s3cret" not in json.dumps(d)
+    assert {k: v for k, v in d.items() if k not in ("ha_token", "ha_token_set")} == {
+        k: v for k, v in s.to_dict().items() if k != "ha_token"
+    }
+    assert Settings().public_dict()["ha_token_set"] is False
+
+
+def test_merged_keeps_token_when_missing_or_empty():
+    s = Settings().merged(_HA)
+    assert s.merged({"ha_verify_tls": False}).ha_token == "s3cret"
+    assert s.merged({"ha_token": ""}).ha_token == "s3cret"
+    assert s.merged({"ha_token": "new"}).ha_token == "new"
+
+
+def test_merged_accepts_public_dict_without_token_set():
+    s = Settings().merged(_HA)
+    d = s.public_dict()
+    del d["ha_token_set"]
+    assert s.merged(d) == s
+
+
+def test_clearing_url_keeps_token():
+    s = Settings().merged(_HA).merged({"ha_url": ""})
+    assert (s.ha_url, s.ha_token) == ("", "s3cret")
+
+
+def test_save_load_round_trip_ha(tmp_path):
+    path = tmp_path / "settings.json"
+    s = Settings().merged(
+        {**_HA, "ha_verify_tls": False, "ha_scenes": {"green": "scene.g", "offline": "scene.o"}}
+    )
+    save(path, s)
+    assert load(path) == (s, None)
+    assert json.loads(path.read_text())["ha_token"] == "s3cret"
+
+
+class FakeHa:
+    def __init__(self):
+        self.configured = []
+
+    def configure(self, *, url, token, verify_tls, scenes, offline_hold):
+        self.configured.append((url, token, verify_tls, scenes, offline_hold))
+
+
+def test_service_configures_ha_on_ha_or_offline_change(tmp_path):
+    from conftest import FakeEngine, FakeLights
+
+    from track_glow.settings import SettingsService
+
+    ha = FakeHa()
+    svc = SettingsService(
+        tmp_path / "s.json",
+        Settings(),
+        FakeEngine(),
+        FakeLights(),
+        build_source=lambda *a: "x",
+        ha=ha,
+    )
+    svc.update({"series": "truck", "controllers": ["a"]})
+    assert ha.configured == []
+    svc.update({**_HA, "ha_scenes": {"green": "scene.g"}})
+    assert ha.configured == [("http://ha.local:8123", "s3cret", True, {"green": "scene.g"}, False)]
+    svc.update({"offline": "hold"})
+    assert ha.configured[-1] == ("http://ha.local:8123", "s3cret", True, {"green": "scene.g"}, True)
+    svc.update({"ha_verify_tls": False})
+    svc.update({"ha_token": "new"})
+    assert len(ha.configured) == 4
+    assert ha.configured[-1][1:3] == ("new", False)
+    svc.update({"ha_token": ""})
+    assert len(ha.configured) == 4
+
+
+def test_service_without_ha_ignores_ha_changes(tmp_path):
+    svc, *_ = _service(tmp_path)
+    assert svc.update(_HA).ha_url == "http://ha.local:8123"

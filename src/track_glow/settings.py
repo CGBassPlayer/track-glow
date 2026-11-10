@@ -1,3 +1,4 @@
+import dataclasses
 import json
 import os
 import tempfile
@@ -5,10 +6,11 @@ import threading
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, fields, replace
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from platformdirs import user_config_dir
 
-from track_glow.models import Series
+from track_glow.models import Flag, Series
 from track_glow.sources import build_source as default_build_source
 from track_glow.wled import ControllerSpec, ProgressSpec
 
@@ -18,6 +20,14 @@ _CHOICES = {
     "source": ("live", "replay"),
     "offline": ("amber", "hold"),
 }
+SCENE_LABELS = {
+    **{f.key: f.label.split(" · ")[0].title() for f in Flag},
+    "no_race": "No race",
+    "offline": "Feed offline",
+    "blackout": "Blackout",
+}
+SCENE_KEYS = tuple(SCENE_LABELS)
+_HA_FIELDS = ("ha_url", "ha_token", "ha_verify_tls", "ha_scenes")
 
 
 class SettingsError(Exception):
@@ -34,11 +44,18 @@ class Settings:
     controllers: tuple[str, ...] = ()
     progress: str | None = None
     offline: str = "amber"
+    ha_url: str = ""
+    ha_token: str = ""
+    ha_verify_tls: bool = True
+    ha_scenes: dict[str, str] = dataclasses.field(default_factory=dict)
 
     def to_dict(self) -> dict:
         d = asdict(self)
         d["controllers"] = list(self.controllers)
         return {"version": VERSION, **d}
+
+    def public_dict(self) -> dict:
+        return {**self.to_dict(), "ha_token": "", "ha_token_set": bool(self.ha_token)}
 
     @classmethod
     def from_dict(cls, d: dict) -> "Settings":
@@ -50,6 +67,8 @@ class Settings:
         for key in patch:
             if key not in known:
                 raise SettingsError(key, f"Unknown setting {key}")
+        if patch.get("ha_token") == "":
+            del patch["ha_token"]
         return self._with(patch)
 
     def _with(self, d: dict) -> "Settings":
@@ -63,6 +82,20 @@ class Settings:
             changes["controllers"] = tuple(value)
         if "progress" in changes and not isinstance(changes["progress"], str | None):
             raise SettingsError("progress", "Progress must be START-STOP, HOST/SEG or empty")
+        for name in ("ha_url", "ha_token"):
+            if name in changes and not isinstance(changes[name], str):
+                raise SettingsError(name, f"{name} must be a string")
+        if "ha_verify_tls" in changes and not isinstance(changes["ha_verify_tls"], bool):
+            raise SettingsError("ha_verify_tls", "ha_verify_tls must be true or false")
+        if "ha_scenes" in changes:
+            value = changes["ha_scenes"]
+            if not isinstance(value, dict) or not all(
+                isinstance(k, str) and isinstance(v, str) for k, v in value.items()
+            ):
+                raise SettingsError("ha_scenes", "Scenes must map scene keys to scene.* ids")
+            changes["ha_scenes"] = {k: v for k, v in value.items() if v}
+        if "ha_url" in changes:
+            changes["ha_url"] = _normalize_url(changes["ha_url"])
         result = replace(self, **changes)
         result.validate()
         return result
@@ -74,6 +107,7 @@ class Settings:
                 raise SettingsError(
                     field, f"Invalid {field} {value!r}; expected one of {', '.join(choices)}"
                 )
+        self._validate_ha()
         specs = self.specs()
         hosts = [s.host for s in specs]
         for host in hosts:
@@ -89,6 +123,23 @@ class Settings:
                 "progress", f"Progress bar host {bar.host} is not one of the controllers"
             )
 
+    def _validate_ha(self) -> None:
+        if self.ha_url:
+            parts = urlsplit(self.ha_url)
+            if parts.scheme not in ("http", "https") or not parts.hostname:
+                raise SettingsError(
+                    "ha_url", f"Invalid Home Assistant URL {self.ha_url!r}; expected http(s)://HOST"
+                )
+            if not self.ha_token:
+                raise SettingsError("ha_token", "Home Assistant needs an access token")
+        for key, entity in self.ha_scenes.items():
+            if key not in SCENE_KEYS:
+                raise SettingsError("ha_scenes", f"Unknown scene key {key}")
+            if not entity.startswith("scene."):
+                raise SettingsError(
+                    "ha_scenes", f"Scene for {key} must start with 'scene.', got {entity!r}"
+                )
+
     def specs(self) -> list[ControllerSpec]:
         try:
             return [ControllerSpec.parse(c) for c in self.controllers]
@@ -102,6 +153,15 @@ class Settings:
             return ProgressSpec.parse(self.progress)
         except ValueError as e:
             raise SettingsError("progress", f"Invalid progress value: {e}") from None
+
+
+def _normalize_url(url: str) -> str:
+    url = url.strip()
+    if not url:
+        return url
+    scheme, sep, rest = url.partition("://")
+    url = f"{scheme.lower()}://{rest}" if sep else f"http://{url}"
+    return url.rstrip("/")
 
 
 def default_path() -> Path:
@@ -155,11 +215,13 @@ class SettingsService:
         lights,
         build_source: Callable = default_build_source,
         warning: str | None = None,
+        ha=None,
     ):
         self._path = path
         self._settings = settings
         self._engine = engine
         self._lights = lights
+        self._ha = ha
         self._build_source = build_source
         self._warning = warning
         self._bad_file = warning is not None
@@ -190,6 +252,16 @@ class SettingsService:
             ):
                 self._lights.configure(
                     new.specs(), progress=new.progress_spec(), offline_hold=new.offline == "hold"
+                )
+            if self._ha is not None and any(
+                getattr(new, f) != getattr(old, f) for f in (*_HA_FIELDS, "offline")
+            ):
+                self._ha.configure(
+                    url=new.ha_url,
+                    token=new.ha_token,
+                    verify_tls=new.ha_verify_tls,
+                    scenes=dict(new.ha_scenes),
+                    offline_hold=new.offline == "hold",
                 )
             self._settings = new
             try:
