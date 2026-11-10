@@ -114,3 +114,19 @@ class Engine:
             self._thread.join(10)
             self._thread = None
         self._source.close()
+
+
+def status_text(state: EngineState) -> str:
+    if state.override is not None:
+        return f"{state.override.label} · manual override"
+    if state.feed.health == "offline":
+        return "Feed offline"
+    if state.waiting_for_series is not None:
+        return f"Waiting for {state.waiting_for_series.label}"
+    race = state.race
+    if race is None or race.flag is None:
+        return "No race"
+    parts = [race.flag.label, race.series.label]
+    if race.lap is not None:
+        parts.append(f"Lap {race.lap}" + (f"/{race.laps_in_race}" if race.laps_in_race else ""))
+    return " · ".join(parts)

@@ -142,3 +142,19 @@ def test_stop_closes_source():
     e.start()
     e.stop()
     assert src.closed
+
+
+def test_status_text_variants():
+    from track_glow.engine import EngineState, status_text
+    from track_glow.models import FeedStatus
+
+    full = RaceState(Flag.GREEN, 1, Series.CUP, 1, lap=112, laps_in_race=267)
+    assert status_text(EngineState(race=full, feed=FeedStatus("ok"))) == "GREEN · Cup · Lap 112/267"
+    no_lap = RaceState(Flag.HOT_TRACK, 8, Series.TRUCK, 1)
+    assert status_text(EngineState(race=no_lap, feed=FeedStatus("ok"))) == "HOT TRACK · Truck"
+    lap_only = RaceState(Flag.YELLOW, 2, Series.CUP, 1, lap=5)
+    assert status_text(EngineState(race=lap_only, feed=FeedStatus("ok"))) == "YELLOW · Cup · Lap 5"
+    assert status_text(EngineState(feed=FeedStatus("offline"))) == "Feed offline"
+    assert status_text(EngineState(waiting_for_series=Series.XFINITY)) == "Waiting for Xfinity"
+    assert status_text(EngineState(feed=FeedStatus("ok"))) == "No race"
+    assert status_text(EngineState(override=Flag.RED)) == "RED · manual override"
