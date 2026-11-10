@@ -48,11 +48,12 @@ def green_engine() -> FakeEngine:
 
 
 class FakeLights:
-    def __init__(self, statuses=None, frame: bytes = b""):
-        from track_glow.outputs.wled import ControllerStatus
+    def __init__(self, statuses=None, frame: bytes = b"", bar=None):
+        from track_glow.outputs.wled import BarStatus, ControllerStatus
 
         self.statuses = statuses or [ControllerStatus("10.0.0.5", 2, "ok")]
         self._frame = frame
+        self.bar = bar or BarStatus("off")
         self.started = False
         self.stopped = False
 
@@ -61,6 +62,9 @@ class FakeLights:
 
     def frame(self) -> bytes:
         return self._frame
+
+    def bar_status(self):
+        return self.bar
 
     def start(self) -> None:
         self.started = True

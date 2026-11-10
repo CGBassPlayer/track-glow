@@ -147,7 +147,9 @@ class LauncherWindow(QMainWindow):
         if self.tray is not None:
             self.tray.setToolTip(f"{APP_NAME} · {text}")
         if self._lights is not None:
-            self.lights_label.setText(lights_summary(self._lights.status()))
+            self.lights_label.setText(
+                lights_summary(self._lights.status(), self._lights.bar_status())
+            )
 
     def _start(self, host: str, port: int) -> None:
         self._server = self._server_factory(host, port)
@@ -203,11 +205,17 @@ class LauncherWindow(QMainWindow):
         event.accept()
 
 
-def lights_summary(statuses: list) -> str:
+def lights_summary(statuses: list, bar=None) -> str:
     ok = sum(1 for c in statuses if c.state == "ok")
     text = f"Lights: {ok}/{len(statuses)} ok"
     problem = next((c.message for c in statuses if c.state == "error" and c.message), "")
-    return f"{text} — {problem}" if problem else text
+    if problem:
+        text = f"{text} — {problem}"
+    if bar is None or bar.state == "off":
+        return text
+    if bar.state == "ok":
+        return f"{text} · Bar {round(bar.fraction * 100)}%"
+    return f"{text} · Bar: {bar.message}"
 
 
 def run_launcher(engine: EngineLike, host: str, port: int, lights: LightsLike | None = None) -> int:

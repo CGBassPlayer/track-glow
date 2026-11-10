@@ -183,3 +183,35 @@ def test_lights_line_summarizes_status(qtbot):
 def test_no_lights_line_without_output(qtbot):
     w = make(qtbot)
     assert w.lights_label.isHidden()
+
+
+def test_lights_summary_includes_bar():
+    from track_glow.launcher import lights_summary
+    from track_glow.outputs.wled import BarStatus, ControllerStatus
+
+    ok = [ControllerStatus("10.0.0.5", 60, "ok")]
+    assert lights_summary(ok, BarStatus("off")) == "Lights: 1/1 ok"
+    assert lights_summary(ok, BarStatus("ok", "", 0, 10, 0.504)) == "Lights: 1/1 ok · Bar 50%"
+    waiting = BarStatus("waiting", "Waiting for b")
+    assert lights_summary(ok, waiting) == "Lights: 1/1 ok · Bar: Waiting for b"
+    err = BarStatus("error", "WLED at b has no segment 9")
+    assert lights_summary(ok, err) == "Lights: 1/1 ok · Bar: WLED at b has no segment 9"
+
+
+def test_lights_line_includes_bar(qtbot):
+    from conftest import FakeLights
+
+    from track_glow.outputs.wled import BarStatus
+
+    lights = FakeLights(bar=BarStatus("ok", "", 0, 10, 0.25))
+    w = LauncherWindow(
+        FakeEngine(),
+        "127.0.0.1",
+        8780,
+        FakeServer,
+        opened.append,
+        tray_available=False,
+        lights=lights,
+    )
+    qtbot.addWidget(w)
+    assert w.lights_label.text() == "Lights: 1/1 ok · Bar 25%"

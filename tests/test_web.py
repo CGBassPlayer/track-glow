@@ -51,6 +51,7 @@ def test_state_green_cup(green_engine):
         "source": "live",
         "status": "GREEN · Cup · Lap 112/267",
         "lights": [],
+        "progress": None,
     }
 
 
@@ -111,3 +112,28 @@ def test_strip_preview_polls_faster_than_flash_and_never_overlaps(fake_engine):
     html = client(fake_engine).get("/").text
     assert "setTimeout(drawStrip, FRAME_MS)" in html and "const FRAME_MS = 100" in html
     assert "setInterval(drawStrip" not in html
+
+
+def test_state_includes_progress(fake_engine):
+    from conftest import FakeLights
+
+    from track_glow.outputs.wled import BarStatus
+
+    lights = FakeLights(bar=BarStatus("ok", "", 10, 20, 0.5))
+    s = TestClient(create_app(fake_engine, lights)).get("/api/state").json()
+    assert s["progress"] == {
+        "state": "ok",
+        "message": "",
+        "start": 10,
+        "stop": 20,
+        "fraction": 0.5,
+    }
+
+
+def test_state_progress_null_without_lights(fake_engine):
+    assert client(fake_engine).get("/api/state").json()["progress"] is None
+
+
+def test_page_shows_bar_status(fake_engine):
+    html = client(fake_engine).get("/").text
+    assert "s.progress" in html and "Bar " in html

@@ -12,7 +12,7 @@ from track_glow.models import Series
 from track_glow.outputs.wled import WledOutput
 from track_glow.server import ServerStartError, WebServer
 from track_glow.sources import build_source
-from track_glow.wled import ControllerSpec
+from track_glow.wled import ControllerSpec, ProgressSpec
 
 DEFAULT_PORT = 8780
 DESKTOP_EXTRA_HINT = (
@@ -99,6 +99,14 @@ def run(
             help="WLED controller, repeatable, in strip order. LEDS skips discovery.",
         ),
     ] = None,
+    progress: Annotated[
+        str | None,
+        typer.Option(
+            metavar="START-STOP|HOST/SEG",
+            help="Lap progress bar: LED range of the whole strip (0-based, stop exclusive) "
+            "or a WLED segment ID on one --wled controller.",
+        ),
+    ] = None,
 ) -> int:
     if host is None:
         host = "0.0.0.0" if headless else "127.0.0.1"
@@ -110,7 +118,17 @@ def run(
     except ValueError as e:
         print(f"Invalid --wled value: {e}", file=sys.stderr)
         return 2
-    lights = WledOutput(engine, specs) if specs else None
+    bar = None
+    if progress is not None:
+        if not specs:
+            print("--progress needs at least one --wled controller", file=sys.stderr)
+            return 2
+        try:
+            bar = ProgressSpec.parse(progress)
+        except ValueError as e:
+            print(f"Invalid --progress value: {e}", file=sys.stderr)
+            return 2
+    lights = WledOutput(engine, specs, progress=bar) if specs else None
     engine.start()
     if lights is not None:
         lights.start()

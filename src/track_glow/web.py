@@ -20,6 +20,7 @@ class EngineLike(Protocol):
 class LightsLike(Protocol):
     def status(self) -> list: ...
     def frame(self) -> bytes: ...
+    def bar_status(self) -> Any: ...
 
 
 class OverrideRequest(BaseModel):
@@ -120,15 +121,23 @@ setInterval(refresh, 2000);
 const LED = 10;
 const FRAME_MS = 100;
 let lights = [];
+function barText(p) {
+  if (!p || p.state === "off") return "";
+  return p.state === "ok" ? "Bar " + Math.round(p.fraction * 100) + "%" : "Bar: " + p.message;
+}
 async function refreshLights() {
+  let progress = null;
   try {
-    lights = (await (await fetch("/api/state")).json()).lights;
+    const s = await (await fetch("/api/state")).json();
+    lights = s.lights;
+    progress = s.progress;
   } catch (e) {}
   document.getElementById("strip-wrap").hidden = lights.length === 0;
   document.getElementById("lights").textContent = lights
     .map(l => l.host + ": " + (l.state === "ok"
       ? l.led_count + " LEDs"
       : l.state + (l.message ? " — " + l.message : "")))
+    .concat(barText(progress) || [])
     .join(" · ");
 }
 async function drawStrip() {
@@ -172,6 +181,19 @@ def lights_json(lights: LightsLike | None) -> list[dict[str, Any]]:
     ]
 
 
+def progress_json(lights: LightsLike | None) -> dict[str, Any] | None:
+    if lights is None:
+        return None
+    b = lights.bar_status()
+    return {
+        "state": b.state,
+        "message": b.message,
+        "start": b.start,
+        "stop": b.stop,
+        "fraction": b.fraction,
+    }
+
+
 def create_app(engine: EngineLike, lights: LightsLike | None = None) -> FastAPI:
     app = FastAPI(title="Track Glow", version=__version__)
 
@@ -185,7 +207,11 @@ def create_app(engine: EngineLike, lights: LightsLike | None = None) -> FastAPI:
 
     @app.get("/api/state")
     def state() -> dict[str, Any]:
-        return {**state_json(engine.snapshot()), "lights": lights_json(lights)}
+        return {
+            **state_json(engine.snapshot()),
+            "lights": lights_json(lights),
+            "progress": progress_json(lights),
+        }
 
     @app.get("/api/frame")
     def frame() -> dict[str, Any]:
@@ -195,6 +221,10 @@ def create_app(engine: EngineLike, lights: LightsLike | None = None) -> FastAPI:
     @app.post("/api/override")
     def override(req: OverrideRequest) -> dict[str, Any]:
         engine.set_override(Flag[req.flag.upper()] if req.flag else None)
-        return {**state_json(engine.snapshot()), "lights": lights_json(lights)}
+        return {
+            **state_json(engine.snapshot()),
+            "lights": lights_json(lights),
+            "progress": progress_json(lights),
+        }
 
     return app

@@ -14,6 +14,7 @@ uv run track-glow --headless [--host HOST] [--port PORT]  # no window (binds 0.0
 uv run track-glow --replay                                # loop a ~2-minute demo race
 uv run track-glow --series xfinity                        # cup (default), xfinity, truck, any
 uv run track-glow --wled 10.0.0.5 --wled 10.0.0.6:60      # drive WLED controllers, in strip order
+uv run track-glow --wled 10.0.0.5 --progress 10.0.0.5/1  # lap progress bar on WLED segment 1
 uv run pytest                                             # run the tests
 ```
 
@@ -43,9 +44,24 @@ controller is retried every 3 s and the rest keep working.
 - WLED's own brightness applies.
 - The web UI shows a live preview of the strip. Sync on real hardware is not yet validated.
 
+#### Lap progress bar
+
+`--progress` puts one bar on part of the strip. It fills by laps (`lap / laps in race`, full on
+checkered) in the current flag's color over a dim track. It doesn't flash, and the rest of the
+strip keeps showing the flag. Give either:
+
+- `START-STOP`: an LED range of the whole virtual strip, e.g. `--progress 100-120`.
+- `HOST/SEG`: segment `SEG` on the `--wled` controller `HOST`, e.g. `--progress 10.0.0.6/1`.
+  The range is read from WLED's segment settings and follows the controller's position in the
+  strip.
+
+Both use WLED's own convention: LEDs are numbered from 0 and the stop is exclusive (WLED's
+segment "Stop" field). The bar's status shows next to the lights in the web UI and launcher.
+
 The desktop launcher needs the `desktop` extra (PySide6). The repo's dev dependencies include
 it. A headless-only install doesn't.
 
 ## Status
 
-Milestone 3: WLED output (spanned, synced, with web preview). No progress bar or Home Assistant yet.
+Milestone 4: WLED output (spanned, synced, with web preview) and lap progress bar. No Home
+Assistant yet.

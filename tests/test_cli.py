@@ -30,6 +30,7 @@ def calls(monkeypatch):
             recorded.append((mode, h, p, snap.source_kind, snap.follow))
             if lights is not None:
                 recorded.append(("lights", [(c.host, c.led_count) for c in lights.status()]))
+                recorded.append(("bar", lights.bar_status().state != "off"))
             return 0
 
         return run
@@ -145,3 +146,25 @@ def test_bad_wled_spec_exit_2(calls, capsys):
     assert main(["--headless", "--wled", "10.0.0.5:abc"]) == 2
     assert calls == []
     assert "10.0.0.5:abc" in capsys.readouterr().err
+
+
+def test_progress_passed_to_output(calls):
+    assert main(["--headless", "--wled", "10.0.0.5:60", "--progress", "10-20"]) == 0
+    assert ("bar", True) in calls
+
+
+def test_no_progress_means_bar_off(calls):
+    assert main(["--headless", "--wled", "10.0.0.5:60"]) == 0
+    assert ("bar", False) in calls
+
+
+def test_bad_progress_exit_2(calls, capsys):
+    assert main(["--headless", "--wled", "10.0.0.5:60", "--progress", "20-10"]) == 2
+    assert calls == []
+    assert "Invalid --progress value" in capsys.readouterr().err
+
+
+def test_progress_without_wled_exit_2(calls, capsys):
+    assert main(["--headless", "--progress", "10-20"]) == 2
+    assert calls == []
+    assert "--progress needs at least one --wled controller" in capsys.readouterr().err
