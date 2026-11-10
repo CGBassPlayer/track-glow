@@ -1,7 +1,7 @@
 import html
 from collections.abc import Callable
 
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QCloseEvent, QColor, QDesktopServices, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -17,10 +17,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from track_glow.engine import status_text
 from track_glow.server import ServerStartError, WebServer
+from track_glow.web import EngineLike
 
 APP_NAME = "Track Glow"
 TRAY_COLOR = "#2e7d32"
+IDLE_COLOR = "#9e9e9e"
+STATUS_REFRESH_MS = 500
 HOSTS = [
     ("This computer only (127.0.0.1)", "127.0.0.1"),
     ("All interfaces (0.0.0.0)", "0.0.0.0"),
@@ -34,14 +38,16 @@ def open_in_browser(url: str) -> None:
 class LauncherWindow(QMainWindow):
     def __init__(
         self,
+        engine: EngineLike,
         host: str,
         port: int,
-        server_factory: Callable[[str, int], WebServer] = WebServer,
+        server_factory: Callable[[str, int], WebServer] | None = None,
         open_url: Callable[[str], object] = open_in_browser,
         tray_available: bool | None = None,
     ):
         super().__init__()
-        self._server_factory = server_factory
+        self._engine = engine
+        self._server_factory = server_factory or (lambda h, p: WebServer(h, p, engine))
         self._open_url = open_url
         self._server: WebServer | None = None
         if tray_available is None:
@@ -55,7 +61,6 @@ class LauncherWindow(QMainWindow):
 
         self.flag_swatch = QLabel()
         self.flag_swatch.setFixedSize(24, 24)
-        self.flag_swatch.setStyleSheet("background: #9e9e9e; border-radius: 4px;")
         self.status_label = QLabel("No race")
         status_row = QHBoxLayout()
         status_row.addWidget(self.flag_swatch)
@@ -123,6 +128,19 @@ class LauncherWindow(QMainWindow):
             self.tray.show()
 
         self._start(host, port)
+        self.refresh_status()
+        self._status_timer = QTimer(self)
+        self._status_timer.timeout.connect(self.refresh_status)
+        self._status_timer.start(STATUS_REFRESH_MS)
+
+    def refresh_status(self) -> None:
+        state = self._engine.snapshot()
+        text = status_text(state)
+        color = state.flag.color if state.flag else IDLE_COLOR
+        self.status_label.setText(text)
+        self.flag_swatch.setStyleSheet(f"background: {color}; border-radius: 4px;")
+        if self.tray is not None:
+            self.tray.setToolTip(f"{APP_NAME} · {text}")
 
     def _start(self, host: str, port: int) -> None:
         self._server = self._server_factory(host, port)
@@ -166,7 +184,9 @@ class LauncherWindow(QMainWindow):
             self.show_window()
 
     def quit(self) -> None:
+        self._status_timer.stop()
         self._stop()
+        self._engine.stop()
         if self.tray is not None:
             self.tray.hide()
         QApplication.quit()
@@ -176,10 +196,10 @@ class LauncherWindow(QMainWindow):
         event.accept()
 
 
-def run_launcher(host: str, port: int) -> int:
+def run_launcher(engine: EngineLike, host: str, port: int) -> int:
     app = QApplication.instance() or QApplication([])
     app.setApplicationName(APP_NAME)
     app.setQuitOnLastWindowClosed(False)
-    window = LauncherWindow(host, port)
+    window = LauncherWindow(engine, host, port)
     window.show()
     return app.exec()

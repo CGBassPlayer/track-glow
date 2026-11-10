@@ -3,10 +3,13 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest  # noqa: E402
+from conftest import GREEN_CUP, FakeEngine  # noqa: E402
 from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
+from track_glow.engine import EngineState  # noqa: E402
 from track_glow.launcher import LauncherWindow  # noqa: E402
+from track_glow.models import FeedStatus, Flag, Series  # noqa: E402
 from track_glow.server import ServerStartError  # noqa: E402
 
 
@@ -41,8 +44,9 @@ def reset():
     opened.clear()
 
 
-def make(qtbot, host="127.0.0.1", port=8780):
-    w = LauncherWindow(host, port, FakeServer, opened.append, tray_available=False)
+def make(qtbot, host="127.0.0.1", port=8780, engine=None):
+    engine = engine or FakeEngine()
+    w = LauncherWindow(engine, host, port, FakeServer, opened.append, tray_available=False)
     qtbot.addWidget(w)
     return w
 
@@ -119,3 +123,31 @@ def test_close_quits(qtbot, monkeypatch):
     w.close()
     assert quits
     assert not FakeServer.instances[-1].running
+
+
+def test_status_follows_engine(qtbot):
+    engine = FakeEngine()
+    w = make(qtbot, engine=engine)
+    assert w.status_label.text() == "No race"
+    engine.state = EngineState(race=GREEN_CUP, feed=FeedStatus("ok"), follow=Series.CUP)
+    w.refresh_status()
+    assert w.status_label.text() == "GREEN · Cup · Lap 112/267"
+    assert Flag.GREEN.color in w.flag_swatch.styleSheet()
+
+
+def test_status_offline_resets_swatch(qtbot):
+    engine = FakeEngine(EngineState(race=GREEN_CUP, feed=FeedStatus("ok")))
+    w = make(qtbot, engine=engine)
+    w.refresh_status()
+    engine.state = EngineState(feed=FeedStatus("offline"))
+    w.refresh_status()
+    assert w.status_label.text() == "Feed offline"
+    assert "#9e9e9e" in w.flag_swatch.styleSheet()
+
+
+def test_quit_stops_engine(qtbot, monkeypatch):
+    monkeypatch.setattr(QApplication, "quit", lambda: None)
+    engine = FakeEngine()
+    w = make(qtbot, engine=engine)
+    w.quit_button.click()
+    assert engine.stopped

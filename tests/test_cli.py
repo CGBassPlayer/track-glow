@@ -6,32 +6,49 @@ import pytest
 
 from track_glow import cli, launcher
 from track_glow.cli import main
+from track_glow.engine import Engine
+from track_glow.models import Series
+from track_glow.sources import build_source
+from track_glow.sources.nascar import NascarFeedSource
+from track_glow.sources.replay import ReplaySource
+
+
+@pytest.fixture(autouse=True)
+def no_engine_thread(monkeypatch):
+    monkeypatch.setattr(Engine, "start", lambda self: None)
 
 
 @pytest.fixture
 def calls(monkeypatch):
     recorded = []
+
+    def record(mode):
+        def run(engine, h, p):
+            snap = engine.snapshot()
+            recorded.append((mode, h, p, snap.source_kind, snap.follow))
+            return 0
+
+        return run
+
     monkeypatch.setattr(cli, "has_display", lambda: True)
-    monkeypatch.setattr(cli, "_run_headless", lambda h, p: recorded.append(("headless", h, p)) or 0)
-    monkeypatch.setattr(
-        launcher, "run_launcher", lambda h, p: recorded.append(("desktop", h, p)) or 0
-    )
+    monkeypatch.setattr(cli, "_run_headless", record("headless"))
+    monkeypatch.setattr(launcher, "run_launcher", record("desktop"))
     return recorded
 
 
 def test_defaults_desktop(calls):
     assert main([]) == 0
-    assert calls == [("desktop", "127.0.0.1", 8780)]
+    assert calls == [("desktop", "127.0.0.1", 8780, "live", Series.CUP)]
 
 
 def test_defaults_headless(calls):
     assert main(["--headless"]) == 0
-    assert calls == [("headless", "0.0.0.0", 8780)]
+    assert calls == [("headless", "0.0.0.0", 8780, "live", Series.CUP)]
 
 
 def test_explicit_host_port_win(calls):
     assert main(["--headless", "--host", "127.0.0.1", "--port", "9000"]) == 0
-    assert calls == [("headless", "127.0.0.1", 9000)]
+    assert calls == [("headless", "127.0.0.1", 9000, "live", Series.CUP)]
 
 
 @pytest.mark.parametrize("port", ["0", "70000"])
@@ -86,3 +103,25 @@ def test_headless_port_in_use_exits_1(capsys):
         s.listen()
         assert main(["--headless", "--host", "127.0.0.1", "--port", str(s.getsockname()[1])]) == 1
     assert "Can't listen" in capsys.readouterr().err
+
+
+def test_series_and_replay_flags(calls):
+    assert main(["--headless", "--replay", "--series", "xfinity"]) == 0
+    assert calls == [("headless", "0.0.0.0", 8780, "replay", Series.XFINITY)]
+
+
+def test_series_any_means_none(calls):
+    assert main(["--headless", "--series", "any"]) == 0
+    assert calls[0][4] is None
+
+
+def test_bad_series_exit_2(calls):
+    assert main(["--headless", "--series", "f1"]) == 2
+    assert calls == []
+
+
+def test_build_source_kinds():
+    assert isinstance(build_source("live", Series.CUP), NascarFeedSource)
+    replay = build_source("replay", None)
+    assert isinstance(replay, ReplaySource) and replay.fetch().series is Series.CUP
+    assert build_source("replay", Series.TRUCK).fetch().series is Series.TRUCK
