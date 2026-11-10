@@ -142,6 +142,29 @@ This builds a one-folder app for the OS you run it on (build on Windows for Wind
 for macOS). The same executable runs the launcher, or `--headless`. `track-glow --version` and
 `python -m track_glow` also work.
 
+#### Windows
+
+Run in PowerShell on Windows (a KVM VM works), from a checkout, with `uv` installed:
+
+```powershell
+packaging\build-windows.ps1         # -> dist\track-glow-windows.zip, smoke-tested
+```
+
+It checks `--version`, headless mode and desktop mode (Qt offscreen). Wine can't build this: Qt needs
+the system `icuuc.dll`, so the Qt DLLs never get bundled. Before sharing the zip, also double-click
+`track-glow.exe` once to see the launcher window, and check that the live feed loads.
+
+#### macOS
+
+Run on the Mac, from a checkout (needs macOS 14+, because PySide6 6.12 wheels are `macosx_14_0_universal2`, and `uv`):
+
+```sh
+packaging/build-macos.sh            # -> dist/track-glow-macos-<arch>.zip, smoke-tested
+```
+
+The app is unsigned. After copying the zip to another Mac, run `xattr -dr com.apple.quarantine track-glow`
+once, or Gatekeeper refuses to open it.
+
 ## Status
 
 Milestone 7: WLED output (spanned, synced, with web preview), lap progress bar, web setup and
