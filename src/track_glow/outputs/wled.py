@@ -22,6 +22,7 @@ log = logging.getLogger(__name__)
 
 STOP_JOIN_SECONDS = 1.0
 DISCOVERY_POLL_SECONDS = 0.1
+SEGMENT_REFRESH_SECONDS = 30.0
 
 
 @dataclass(frozen=True)
@@ -89,7 +90,7 @@ class WledOutput(Output):
                 self._bar_controller = hosts.index(progress.host)
             else:
                 self._bar_config_error = f"Progress host {progress.host} is not a --wled controller"
-        self._bar = BarStatus("off") if progress is None else BarStatus("waiting")
+        self._bar = BarStatus("off") if progress is None else BarStatus("waiting", "Starting")
         if self._bar_config_error:
             self._bar = BarStatus("error", self._bar_config_error)
 
@@ -111,17 +112,21 @@ class WledOutput(Output):
 
     def _discover_segment(self, now: float) -> None:
         i = self._bar_controller
-        if i is None or self._segment is not None or self._stop.is_set():
+        if i is None or self._stop.is_set() or self.status()[i].state != "ok":
             return
-        if self.status()[i].state != "ok" or now - self._segment_attempt < self._retry:
+        have = self._segment is not None
+        if now - self._segment_attempt < (SEGMENT_REFRESH_SECONDS if have else self._retry):
             return
         started = self._clock()
         try:
             segment = self._fetch_segment(self._progress.host, self._progress.segment)
             error = ""
         except WledError as e:
+            if have:
+                return
             segment, error = None, str(e)
-        self._segment_attempt = now + (self._clock() - started)
+        finally:
+            self._segment_attempt = now + (self._clock() - started)
         with self._lock:
             self._segment, self._segment_error = segment, error
 
@@ -161,6 +166,10 @@ class WledOutput(Output):
             self._changed_at = now
 
         bar = self._resolve_bar(live, n, state)
+        if bar.state == "ok" and scene is None:
+            bar = BarStatus("waiting", "No race")
+        elif bar.state == "ok" and scene[0] == "offline":
+            bar = BarStatus("waiting", "Feed offline")
         if n == 0 or scene is None:
             frame = b""
         elif scene[0] == "offline":
@@ -213,6 +222,12 @@ class WledOutput(Output):
                 if c.host == spec.host:
                     break
                 offset += c.led_count
+            if segment[1] > controller.led_count:
+                return BarStatus(
+                    "error",
+                    f"Segment {spec.segment} on {spec.host} ends past its "
+                    f"{controller.led_count} LEDs",
+                )
             start, stop = offset + segment[0], offset + segment[1]
         if n == 0:
             return BarStatus("waiting", "No controllers")

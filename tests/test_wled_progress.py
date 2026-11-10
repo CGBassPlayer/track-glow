@@ -4,6 +4,7 @@ from test_wled_output import make, step
 
 from track_glow.engine import EngineState
 from track_glow.models import FeedStatus, Flag, RaceState, Series
+from track_glow.outputs.wled import BarStatus
 from track_glow.render import LED_COLORS, WHITE, flag_frame, progress_bar, solid
 from track_glow.wled import ProgressSpec, WledError
 
@@ -169,3 +170,80 @@ def test_offline_and_release_ignore_bar():
 def test_bar_status_off_without_spec():
     out, _ = make(["a:20"])
     assert out.bar_status().state == "off"
+
+
+def test_segment_refetched_after_edit():
+    seg = {"v": (5, 15)}
+    out, sender = with_bar(["a:10", "b:30"], "b/1", fetch_segment=lambda h, s: seg["v"])
+    step(out, sender, 0.0)
+    assert (out.bar_status().start, out.bar_status().stop) == (15, 25)
+    seg["v"] = (0, 30)
+    step(out, sender, 29.0)
+    assert (out.bar_status().start, out.bar_status().stop) == (15, 25)
+    step(out, sender, 30.0)
+    assert (out.bar_status().start, out.bar_status().stop) == (10, 40)
+
+
+def test_failed_refetch_keeps_last_segment():
+    calls = []
+
+    def fetch(host, segment):
+        calls.append(host)
+        if len(calls) > 1:
+            raise WledError("Can't reach WLED at b")
+        return (5, 15)
+
+    out, sender = with_bar(["a:10", "b:30"], "b/1", fetch_segment=fetch)
+    step(out, sender, 0.0)
+    step(out, sender, 30.0)
+    assert len(calls) == 2
+    bar = out.bar_status()
+    assert (bar.state, bar.start, bar.stop) == ("ok", 15, 25)
+
+
+def test_segment_past_controller_leds_is_error():
+    out, sender = with_bar(["a:60", "b:100"], "a/1", fetch_segment=lambda h, s: (50, 100))
+    step(out, sender, 0.0)
+    step(out, sender, 2.0)
+    bar = out.bar_status()
+    assert (bar.state, bar.message) == ("error", "Segment 1 on a ends past its 60 LEDs")
+    assert out.frame() == solid(160, GREEN)
+
+
+def test_bar_status_not_ok_when_bar_not_drawn():
+    offline = FakeEngine(EngineState(feed=FeedStatus("offline")))
+    out, sender = with_bar(["a:20"], "10-20", engine=offline)
+    step(out, sender, 0.0)
+    assert (out.bar_status().state, out.bar_status().message) == ("waiting", "Feed offline")
+    released = FakeEngine(EngineState(feed=FeedStatus("ok")))
+    out, sender = with_bar(["a:20"], "10-20", engine=released)
+    step(out, sender, 0.0)
+    assert (out.bar_status().state, out.bar_status().message) == ("waiting", "No race")
+
+
+def test_unexpected_fetch_error_still_waits_for_retry():
+    calls = []
+
+    def fetch(host, segment):
+        calls.append(host)
+        raise ValueError("bad host")
+
+    out, sender = with_bar(["a:10"], "a/1", fetch_segment=fetch)
+    for now in (0.0, 0.1, 0.2, 2.9):
+        sender.now = now
+        with pytest.raises(ValueError) if now == 0.0 else _nothing():
+            out.discover_pending(now)
+    assert calls == ["a"]
+
+
+def test_initial_bar_status_has_message():
+    out, _ = with_bar(["a:20"], "10-20")
+    assert out.bar_status() == BarStatus("waiting", "Starting")
+
+
+class _nothing:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
