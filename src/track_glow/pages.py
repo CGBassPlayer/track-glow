@@ -321,10 +321,21 @@ controllerBox.onclick = e => {
   const row = e.target.closest(".ctl");
   const btn = e.target.closest("button");
   if (!row || !btn) return;
-  if (btn.classList.contains("up")) row.previousElementSibling?.before(row);
-  else if (btn.classList.contains("down")) row.nextElementSibling?.after(row);
-  else row.remove();
+  if (btn.classList.contains("del")) {
+    const near = row.nextElementSibling || row.previousElementSibling;
+    row.remove();
+    renumber();
+    if (near) near.querySelector(".host").focus();
+    else document.getElementById("add-controller").focus();
+    return;
+  }
+  const up = btn.classList.contains("up");
+  const prev = row.previousElementSibling;
+  const next = row.nextElementSibling;
+  if (up && prev) row.after(prev);
+  else if (!up && next) row.before(next);
   renumber();
+  if (btn.disabled) row.querySelector(up ? ".down" : ".up").focus();
 };
 document.getElementById("add-controller").onclick = () => {
   controllerBox.append(controllerRow("", ""));
@@ -332,7 +343,11 @@ document.getElementById("add-controller").onclick = () => {
 };
 async function refresh() {
   let ha = null;
-  try { ha = (await (await fetch("/api/state")).json()).home_assistant; } catch (e) { return; }
+  try {
+    const r = await fetch("/api/state");
+    if (!r.ok) return;
+    ha = (await r.json()).home_assistant;
+  } catch (e) { return; }
   document.getElementById("ha-status").textContent = !ha || ha.state === "off"
     ? "Off" : ha.state === "ok" ? "OK · last scene " + sceneName(ha.scene)
     : ha.state + (ha.message ? " — " + ha.message : "");
@@ -377,7 +392,12 @@ function fillForm(st) {
   document.getElementById("ha-verify").checked = st.ha_verify_tls;
   SCENES.forEach(([key]) =>
     selectScene(document.getElementById("scene-" + key), st.ha_scenes[key] || ""));
-  if (st.ha_url && st.ha_token_set) loadScenes();
+  if (st.ha_url && st.ha_token_set) {
+    loadScenes();
+  } else {
+    document.getElementById("ha-test-result").textContent = "";
+    fillSceneOptions([]);
+  }
 }
 async function loadSettings() {
   const r = await fetch("/api/settings");
@@ -393,14 +413,19 @@ SCENES.forEach(([key, label]) => {
   l.append(sel);
   sceneBox.append(l);
 });
+let sceneLoads = 0;
 async function loadScenes() {
+  const n = ++sceneLoads;
   const out = document.getElementById("ha-test-result");
   out.textContent = "Testing…";
   let r;
   try {
     const res = await fetch("/api/ha/test", {method: "POST"});
+    if (n !== sceneLoads) return;
     r = await res.json();
+    if (n !== sceneLoads) return;
   } catch (e) {
+    if (n !== sceneLoads) return;
     out.textContent = "Test failed (Track Glow error)";
     return;
   }

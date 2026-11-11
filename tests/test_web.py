@@ -379,6 +379,34 @@ def test_scene_picker_keeps_unknown_saved_id(fake_engine):
     html = client(fake_engine).get("/settings").text
     assert "fillSceneOptions" in html
     assert '" (" + s.id + ")"' in html
+    assert "sceneOption(id, id)" in html
+
+
+def test_settings_ha_off_clears_stale_scene_state(fake_engine):
+    html = client(fake_engine).get("/settings").text
+    assert "} else {" in html and "fillSceneOptions([])" in html
+    assert 'getElementById("ha-test-result").textContent = ""' in html
+
+
+def test_settings_load_scenes_ignores_stale_responses(fake_engine):
+    html = client(fake_engine).get("/settings").text
+    assert "let sceneLoads = 0" in html
+    assert "const n = ++sceneLoads;" in html
+    assert html.count("if (n !== sceneLoads) return;") == 3
+
+
+def test_settings_refresh_keeps_status_on_http_error(fake_engine):
+    html = client(fake_engine).get("/settings").text
+    assert "if (!r.ok) return;" in html
+
+
+def test_controller_rows_keep_focus_on_move_and_remove(fake_engine):
+    html = client(fake_engine).get("/settings").text
+    assert "row.after(prev)" in html and "row.before(next)" in html
+    assert 'btn.classList.contains("del")' in html
+    assert 'near.querySelector(".host").focus()' in html
+    assert "if (btn.disabled)" in html
+    assert 'getElementById("add-controller").focus()' in html
 
 
 def test_settings_autoloads_scenes(fake_engine):
