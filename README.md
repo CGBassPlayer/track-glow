@@ -6,6 +6,8 @@ track. One process runs the engine and a web UI on your LAN for setup and contro
 a small launcher window shows status and the web UI address and sits in the system tray. On a
 server, it runs headless.
 
+![Dashboard: green flag, live strip preview with the lap progress bar, and controls](docs/screenshots/dashboard.png)
+
 ## Usage
 
 ```sh
@@ -32,6 +34,8 @@ Everything else is set up in the web UI and applies immediately, with no restart
   restart comes back on, with no test flag.
 - **Settings** (`/settings`): WLED controllers, the lap progress bar, what to show when the feed
   goes offline (dim amber, or hold the last flag), and Home Assistant.
+
+<img src="docs/screenshots/settings.png" alt="Settings: WLED controllers in strip order, lap progress bar, offline behavior, and Home Assistant scene per flag" width="420">
 
 Settings are saved to `settings.json` in your OS config folder (on Linux
 `~/.config/track-glow/settings.json`), or to the path in `TRACK_GLOW_CONFIG`. The file is written
