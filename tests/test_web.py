@@ -385,6 +385,7 @@ def test_scene_picker_keeps_unknown_saved_id(fake_engine):
 def test_settings_ha_off_clears_stale_scene_state(fake_engine):
     html = client(fake_engine).get("/settings").text
     assert "} else {" in html and "fillSceneOptions([])" in html
+    assert "sceneLoads++;" in html
     assert 'getElementById("ha-test-result").textContent = ""' in html
 
 

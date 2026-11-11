@@ -395,6 +395,7 @@ function fillForm(st) {
   if (st.ha_url && st.ha_token_set) {
     loadScenes();
   } else {
+    sceneLoads++;
     document.getElementById("ha-test-result").textContent = "";
     fillSceneOptions([]);
   }
