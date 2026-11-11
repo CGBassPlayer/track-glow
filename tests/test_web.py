@@ -205,9 +205,9 @@ def test_post_mode(fake_engine):
     assert c.post("/api/mode", json={"mode": "disco"}).status_code == 422
 
 
-def test_page_has_controls_and_settings_form(fake_engine):
+def test_dashboard_has_controls(fake_engine):
     html = client(fake_engine).get("/").text
-    for hook in ('id="controls"', 'id="settings-form"', "/api/mode", '"PATCH"', 'id="warning"'):
+    for hook in ('id="controls"', "/api/mode", '"PATCH"', 'id="warning"'):
         assert hook in html, hook
     for flag in ("green", "yellow", "red", "white", "checkered"):
         assert f'"key": "{flag}"' in html
@@ -215,8 +215,48 @@ def test_page_has_controls_and_settings_form(fake_engine):
         assert f'data-mode="{mode}"' in html
 
 
-def test_page_only_says_saved_without_warning(fake_engine):
+def test_dashboard_has_no_settings_form(fake_engine):
     html = client(fake_engine).get("/").text
+    assert 'id="settings-form"' not in html
+    assert 'href="/settings"' in html
+    assert '<a href="/" aria-current="page">' in html
+
+
+def test_settings_page_served(fake_engine):
+    r = client(fake_engine).get("/settings")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/html")
+    for hook in ('id="settings-form"', 'id="ha-scenes"', '"PATCH"', 'id="warning"'):
+        assert hook in r.text, hook
+    assert '<a href="/settings" aria-current="page">' in r.text
+    assert 'id="controls"' not in r.text
+
+
+def test_controllers_are_rows(fake_engine):
+    text = client(fake_engine).get("/settings").text
+    for hook in (
+        'id="add-controller"',
+        'placeholder="auto"',
+        'aria-label="Move up"',
+        'aria-label="Remove"',
+    ):
+        assert hook in text, hook
+    assert '<textarea id="controllers"' not in text
+
+
+def test_controllers_save_skips_blank_hosts(fake_engine):
+    text = client(fake_engine).get("/settings").text
+    assert ".filter(c => c.host)" in text
+
+
+def test_pages_follow_color_scheme(fake_engine):
+    c = client(fake_engine)
+    for path in ("/", "/settings"):
+        assert "color-scheme: light dark" in c.get(path).text, path
+
+
+def test_page_only_says_saved_without_warning(fake_engine):
+    html = client(fake_engine).get("/settings").text
     assert 'ok && !lastWarning ? "Saved"' in html
 
 
@@ -298,14 +338,17 @@ def test_ha_test_ok_and_error(tmp_path, fake_engine, monkeypatch):
                 raise HaError(Fake.fail)
 
         def list_scenes(self):
-            return ["scene.a", "scene.b"]
+            return [{"id": "scene.a", "name": "A"}, {"id": "scene.b", "name": "B"}]
 
         def close(self):
             pass
 
     monkeypatch.setattr(web, "HaClient", Fake)
     c, _ = _ha_client(tmp_path, fake_engine, Settings(ha_url="http://ha:8123", ha_token="t"))
-    assert c.post("/api/ha/test").json() == {"ok": True, "scenes": ["scene.a", "scene.b"]}
+    assert c.post("/api/ha/test").json() == {
+        "ok": True,
+        "scenes": [{"id": "scene.a", "name": "A"}, {"id": "scene.b", "name": "B"}],
+    }
     assert made == [("http://ha:8123", "t", True)]
     Fake.fail = "Home Assistant rejected the access token"
     assert c.post("/api/ha/test").json() == {
@@ -315,11 +358,58 @@ def test_ha_test_ok_and_error(tmp_path, fake_engine, monkeypatch):
 
 
 def test_page_has_home_assistant_card(fake_engine):
-    html = client(fake_engine).get("/").text
-    for hook in ('id="ha-url"', 'id="ha-token"', "/api/ha/test", "<datalist", 'id="ha-scenes"'):
+    html = client(fake_engine).get("/settings").text
+    for hook in ('id="ha-url"', 'id="ha-token"', "/api/ha/test", 'id="ha-scenes"'):
         assert hook in html, hook
 
 
 def test_page_ha_test_handles_errors(fake_engine):
-    html = client(fake_engine).get("/").text
+    html = client(fake_engine).get("/settings").text
     assert 'out.textContent = "Test failed' in html
+
+
+def test_scene_pickers_are_selects(fake_engine):
+    html = client(fake_engine).get("/settings").text
+    assert 'createElement("select")' in html
+    for gone in ("<datalist", 'list="', 'setAttribute("list"'):
+        assert gone not in html, gone
+
+
+def test_scene_picker_keeps_unknown_saved_id(fake_engine):
+    html = client(fake_engine).get("/settings").text
+    assert "fillSceneOptions" in html
+    assert '" (" + s.id + ")"' in html
+    assert "sceneOption(id, id)" in html
+
+
+def test_settings_ha_off_clears_stale_scene_state(fake_engine):
+    html = client(fake_engine).get("/settings").text
+    assert "} else {" in html and "fillSceneOptions([])" in html
+    assert "sceneLoads++;" in html
+    assert 'getElementById("ha-test-result").textContent = ""' in html
+
+
+def test_settings_load_scenes_ignores_stale_responses(fake_engine):
+    html = client(fake_engine).get("/settings").text
+    assert "let sceneLoads = 0" in html
+    assert "const n = ++sceneLoads;" in html
+    assert html.count("if (n !== sceneLoads) return;") == 3
+
+
+def test_settings_refresh_keeps_status_on_http_error(fake_engine):
+    html = client(fake_engine).get("/settings").text
+    assert "if (!r.ok) return;" in html
+
+
+def test_controller_rows_keep_focus_on_move_and_remove(fake_engine):
+    html = client(fake_engine).get("/settings").text
+    assert "row.after(prev)" in html and "row.before(next)" in html
+    assert 'btn.classList.contains("del")' in html
+    assert 'near.querySelector(".host").focus()' in html
+    assert "if (btn.disabled)" in html
+    assert 'getElementById("add-controller").focus()' in html
+
+
+def test_settings_autoloads_scenes(fake_engine):
+    html = client(fake_engine).get("/settings").text
+    assert "st.ha_url && st.ha_token_set" in html and "loadScenes()" in html

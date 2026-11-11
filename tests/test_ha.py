@@ -50,19 +50,31 @@ def test_turn_on_scene_posts_entity_with_auth():
     assert json.loads(req.content) == {"entity_id": "scene.green"}
 
 
-def test_list_scenes_filters_and_sorts():
+def test_list_scenes_returns_names_sorted_by_name():
     states = [
-        {"entity_id": "scene.red"},
-        {"entity_id": "light.kitchen"},
-        {"entity_id": "scene.green"},
-        {"entity_id": "sensor.temp"},
+        {"entity_id": "scene.red", "attributes": {"friendly_name": "Red Flag"}},
+        {"entity_id": "light.kitchen", "attributes": {"friendly_name": "Kitchen"}},
+        {"entity_id": "scene.green", "attributes": {"friendly_name": "green flag"}},
+        {"entity_id": "scene.bare"},
+        {"entity_id": "scene.blank", "attributes": {"friendly_name": ""}},
     ]
     ha, requests = make(lambda r: httpx2.Response(200, json=states))
-    assert ha.list_scenes() == ["scene.green", "scene.red"]
+    assert ha.list_scenes() == [
+        {"id": "scene.green", "name": "green flag"},
+        {"id": "scene.red", "name": "Red Flag"},
+        {"id": "scene.bare", "name": "scene.bare"},
+        {"id": "scene.blank", "name": "scene.blank"},
+    ]
     (req,) = requests
     assert req.method == "GET"
     assert str(req.url) == f"{URL}/api/states"
     assert req.headers["Authorization"] == f"Bearer {TOKEN}"
+
+
+def test_list_scenes_ignores_non_dict_attributes():
+    states = [{"entity_id": "scene.odd", "attributes": "nope"}]
+    ha, _ = make(lambda r: httpx2.Response(200, json=states))
+    assert ha.list_scenes() == [{"id": "scene.odd", "name": "scene.odd"}]
 
 
 def test_list_scenes_bad_shape_is_unexpected_reply():

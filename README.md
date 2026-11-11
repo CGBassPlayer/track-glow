@@ -6,6 +6,8 @@ track. One process runs the engine and a web UI on your LAN for setup and contro
 a small launcher window shows status and the web UI address and sits in the system tray. On a
 server, it runs headless.
 
+![Dashboard: green flag, live strip preview with the lap progress bar, and controls](docs/screenshots/dashboard.png)
+
 ## Usage
 
 ```sh
@@ -26,11 +28,14 @@ minimizes the window instead.
 
 Everything else is set up in the web UI and applies immediately, with no restart:
 
-- **Controls:** fire a test flag (stays until **Clear**), **On / Pause / Blackout** (Pause hands
-  the lights back to WLED; Blackout keeps them dark), **Live / Replay**, and the followed series.
-  Test flag and Pause/Blackout aren't saved: a restart comes back on, with no test flag.
-- **Setup:** WLED controllers, the lap progress bar, and what to show when the feed goes offline
-  (dim amber, or hold the last flag).
+- **Dashboard** (`/`): status, strip preview, and controls: fire a test flag (stays until
+  **Clear**), **On / Pause / Blackout** (Pause hands the lights back to WLED; Blackout keeps them
+  dark), **Live / Replay**, and the followed series. Test flag and Pause/Blackout aren't saved: a
+  restart comes back on, with no test flag.
+- **Settings** (`/settings`): WLED controllers, the lap progress bar, what to show when the feed
+  goes offline (dim amber, or hold the last flag), and Home Assistant.
+
+<img src="docs/screenshots/settings.png" alt="Settings: WLED controllers in strip order, lap progress bar, offline behavior, and Home Assistant scene per flag" width="420">
 
 Settings are saved to `settings.json` in your OS config folder (on Linux
 `~/.config/track-glow/settings.json`), or to the path in `TRACK_GLOW_CONFIG`. The file is written
@@ -81,7 +86,7 @@ segment "Stop" field). The bar's status shows next to the lights in the web UI a
 ### Home Assistant
 
 Track Glow can also trigger a Home Assistant scene on each change. Set it up in the web UI under
-**Setup → Home Assistant**:
+**Settings → Home Assistant**:
 
 1. In Home Assistant, open your profile → **Security** → **Long-lived access tokens** → **Create
    token**.
