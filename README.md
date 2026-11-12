@@ -13,7 +13,7 @@ server, it runs headless.
 ```sh
 uv run track-glow                                         # desktop launcher (binds 127.0.0.1:8780)
 uv run track-glow --headless [--host HOST] [--port PORT]  # no window (binds 0.0.0.0:8780)
-uv run track-glow --replay                                # loop a ~2-minute demo race
+uv run track-glow --replay                                # loop a ~4½-minute demo race
 uv run track-glow --series xfinity                        # cup (default), xfinity, truck, any
 uv run track-glow --wled 10.0.0.5 --wled 10.0.0.6:60      # drive WLED controllers, in strip order
 uv run track-glow --wled 10.0.0.5 --progress 10.0.0.5/1  # lap progress bar on WLED segment 1

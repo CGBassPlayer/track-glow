@@ -6,15 +6,17 @@ from track_glow.sources import RaceSource
 
 LAPS_IN_RACE = 80
 
+LAP_SECONDS = 3
+
 SCRIPT: tuple[tuple[float, Flag, int, int], ...] = (
     (6, Flag.COLD_TRACK, 0, 0),
     (6, Flag.HOT_TRACK, 0, 0),
-    (23, Flag.GREEN, 1, 24),
-    (10, Flag.YELLOW, 24, 28),
-    (32, Flag.GREEN, 28, 60),
+    (23 * LAP_SECONDS, Flag.GREEN, 1, 24),
+    (4 * LAP_SECONDS, Flag.YELLOW, 24, 28),
+    (32 * LAP_SECONDS, Flag.GREEN, 28, 60),
     (8, Flag.RED, 60, 60),
-    (19, Flag.GREEN, 60, 79),
-    (6, Flag.WHITE, 79, 80),
+    (19 * LAP_SECONDS, Flag.GREEN, 60, 79),
+    (1 * LAP_SECONDS, Flag.WHITE, 79, 80),
     (12, Flag.CHECKERED, 80, 80),
 )
 TOTAL = sum(seg[0] for seg in SCRIPT)
