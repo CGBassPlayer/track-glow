@@ -248,6 +248,106 @@ def test_status_when_paused_or_waiting_for_flag():
     assert out.ha_status() == HaStatus("idle", "Waiting for a flag")
 
 
+WITH_DEFAULT = {**SCENES, "checkered": "scene.checkered", "default": "scene.warm"}
+
+
+def test_reverts_to_default_after_flash_hold():
+    out = make(scenes=WITH_DEFAULT)
+    out.step(0.0)
+    out.step(1.4)
+    assert calls() == ["scene.green"]
+    out.step(1.5)
+    out.step(3.0)
+    assert calls() == ["scene.green", "scene.warm"]
+    assert out.ha_status() == HaStatus("ok", "", "scene.warm")
+
+
+def test_checkered_holds_five_seconds_before_default():
+    out = make(FakeEngine(race_state(Flag.CHECKERED)), scenes=WITH_DEFAULT)
+    out.step(0.0)
+    out.step(4.9)
+    assert calls() == ["scene.checkered"]
+    out.step(5.0)
+    assert calls() == ["scene.checkered", "scene.warm"]
+
+
+def test_new_flag_mid_hold_restarts_timer():
+    engine = FakeEngine(race_state())
+    out = make(engine, scenes=WITH_DEFAULT)
+    out.step(0.0)
+    engine.state = race_state(Flag.RED)
+    out.step(1.0)
+    out.step(2.4)
+    assert calls() == ["scene.green", "scene.red"]
+    out.step(2.5)
+    assert calls() == ["scene.green", "scene.red", "scene.warm"]
+
+
+def test_no_default_scene_never_reverts():
+    out = make()
+    out.step(0.0)
+    out.step(10.0)
+    assert calls() == ["scene.green"]
+
+
+def test_steady_scenes_do_not_revert():
+    out = make(FakeEngine(EngineState(feed=FeedStatus("ok"))), scenes=WITH_DEFAULT)
+    out.step(0.0)
+    out.step(10.0)
+    assert calls() == ["scene.idle"]
+
+
+def test_pause_reverts_to_default_and_resume_resends_flag():
+    engine = FakeEngine(race_state())
+    out = make(engine, scenes=WITH_DEFAULT)
+    out.step(0.0)
+    engine.state = replace(race_state(), mode="paused")
+    out.step(0.5)
+    out.step(0.75)
+    assert calls() == ["scene.green", "scene.warm"]
+    engine.state = race_state()
+    out.step(1.0)
+    assert calls() == ["scene.green", "scene.warm", "scene.green"]
+    out.step(2.5)
+    assert calls() == ["scene.green", "scene.warm", "scene.green", "scene.warm"]
+
+
+def test_pause_after_hold_reverted_does_not_resend_default():
+    engine = FakeEngine(race_state())
+    out = make(engine, scenes=WITH_DEFAULT)
+    out.step(0.0)
+    out.step(1.5)
+    engine.state = replace(race_state(), mode="paused")
+    out.step(2.0)
+    assert calls() == ["scene.green", "scene.warm"]
+    engine.state = race_state()
+    out.step(2.5)
+    assert calls() == ["scene.green", "scene.warm", "scene.green"]
+
+
+def test_paused_before_any_flag_leaves_lights_alone():
+    out = make(FakeEngine(replace(race_state(), mode="paused")), scenes=WITH_DEFAULT)
+    out.step(0.0)
+    assert calls() == []
+
+
+def test_failed_revert_retries_after_interval():
+    out = make(scenes=WITH_DEFAULT)
+    out.step(0.0)
+    client = FakeClient.made[0]
+    client.fail = "down"
+    out.step(1.5)
+    assert out.ha_status() == HaStatus("error", "down")
+    out.step(3.0)
+    assert calls() == ["scene.green", "scene.warm"]
+    client.fail = None
+    out.step(6.6)
+    assert calls() == ["scene.green", "scene.warm", "scene.warm"]
+    assert out.ha_status() == HaStatus("ok", "", "scene.warm")
+    out.step(9.0)
+    assert len(calls()) == 3
+
+
 def test_config_repr_hides_token():
     out = make()
     assert "'t'" not in repr(out._config) and "token=" not in repr(out._config)
