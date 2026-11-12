@@ -463,6 +463,25 @@ def test_merged_keeps_token_when_missing_or_empty():
     assert s.merged({"ha_token": "new"}).ha_token == "new"
 
 
+def test_changing_ha_url_does_not_carry_saved_token_to_new_host():
+    s = Settings().merged(_HA)
+    with pytest.raises(SettingsError) as e:
+        s.merged({"ha_url": "http://attacker.example:8123"})
+    assert e.value.field == "ha_token"
+    assert s.ha_token == "s3cret"
+
+
+def test_changing_ha_url_with_new_token_is_accepted():
+    s = Settings().merged(_HA).merged({"ha_url": "http://other:8123", "ha_token": "new"})
+    assert (s.ha_url, s.ha_token) == ("http://other:8123", "new")
+
+
+def test_resaving_same_ha_url_keeps_token():
+    s = Settings().merged(_HA)
+    assert s.merged({"ha_url": _HA["ha_url"]}).ha_token == "s3cret"
+    assert s.merged({"ha_url": _HA["ha_url"], "ha_token": ""}).ha_token == "s3cret"
+
+
 def test_merged_accepts_public_dict_without_token_set():
     s = Settings().merged(_HA)
     d = s.public_dict()

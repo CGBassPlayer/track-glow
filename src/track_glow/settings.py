@@ -74,6 +74,14 @@ class Settings:
             patch["ha_token"] = patch["ha_token"].strip()
             if not patch["ha_token"]:
                 del patch["ha_token"]
+        # The UI can't read the saved token back, so a new URL must not inherit it:
+        # otherwise anyone who can PATCH the URL gets the token sent to their host.
+        if (
+            isinstance(patch.get("ha_url"), str)
+            and "ha_token" not in patch
+            and _normalize_url(patch["ha_url"]) not in ("", self.ha_url)
+        ):
+            patch["ha_token"] = ""
         return self._with(patch)
 
     def _with(self, d: dict) -> "Settings":
