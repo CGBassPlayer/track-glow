@@ -94,6 +94,11 @@ Track Glow can also trigger a Home Assistant scene on each change. Set it up in 
 3. **Test connection** checks the token and lists your scenes.
 4. Pick a scene for each state you want: one per flag, plus **No race**, **Feed offline** and
    **Blackout**. States without a scene are skipped. Then **Save**.
+5. Optional: pick a **Default (resting)** scene, e.g. your normal lighting. Each flag scene then
+   lasts as long as that flag flashes on the LEDs (1.5 s, or 5 s for checkered) before Home
+   Assistant switches back to the Default scene. **Pause** also switches to it, and resuming fires
+   the current flag's scene again. Without a Default scene, flag scenes stay on until the state
+   changes.
 
 Each scene is triggered once when the state changes (no flashing on the HA side) and retried every
 5 s if HA can't be reached. **Pause** leaves Home Assistant alone. With "hold the last flag", a feed

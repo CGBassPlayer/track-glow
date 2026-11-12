@@ -26,6 +26,7 @@ SCENE_LABELS = {
     "no_race": "No race",
     "offline": "Feed offline",
     "blackout": "Blackout",
+    "default": "Default (resting)",
 }
 SCENE_KEYS = tuple(SCENE_LABELS)
 _SCENE_ID = re.compile(r"scene\.[a-z0-9_]+")
