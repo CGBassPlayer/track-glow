@@ -7,12 +7,16 @@ from typing import Literal
 
 from track_glow.engine import EngineState
 from track_glow.ha import HaClient, HaError
+from track_glow.models import Flag
 from track_glow.outputs import Output
+from track_glow.render import CHECKERED_SECONDS, FLASH_SECONDS
 from track_glow.web import EngineLike
 
 log = logging.getLogger(__name__)
 
 STOP_JOIN_SECONDS = 1.0
+DEFAULT_KEY = "default"
+_FLASH_HOLD = {f.key: FLASH_SECONDS for f in Flag} | {Flag.CHECKERED.key: CHECKERED_SECONDS}
 
 
 @dataclass(frozen=True)
@@ -54,6 +58,7 @@ class HomeAssistantOutput(Output):
         self._sent_key: str | None = None
         self._last_flag_key: str | None = None
         self._failed_key: str | None = None
+        self._hold_until: float | None = None
         self._next_try = float("-inf")
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -100,6 +105,21 @@ class HomeAssistantOutput(Output):
             ):
                 self._status = HaStatus("idle", message, self._status.scene)
 
+    def _revert(self, generation: int, entity: str, now: float) -> bool:
+        if self._failed_key == DEFAULT_KEY and now < self._next_try:
+            return False
+        started = self._clock()
+        try:
+            self._client.turn_on_scene(entity)
+        except HaError as e:
+            if self._set_status(generation, HaStatus("error", str(e))):
+                self._failed_key = DEFAULT_KEY
+                self._next_try = now + (self._clock() - started) + self._retry
+            return False
+        self._set_status(generation, HaStatus("ok", "", entity))
+        self._failed_key = self._hold_until = None
+        return True
+
     def step(self, now: float) -> None:
         with self._lock:
             generation, config = self._generation, self._config
@@ -112,21 +132,27 @@ class HomeAssistantOutput(Output):
                 if config.url
                 else None
             )
-            self._sent_key = self._failed_key = None
+            self._sent_key = self._failed_key = self._hold_until = None
             self._next_try = float("-inf")
         if self._client is None:
             return
+        scenes = dict(config.scenes)
+        default = scenes.get(DEFAULT_KEY)
         state = self._engine.snapshot()
         if state.mode == "paused":
             self._replace_connecting(generation, "Paused")
+            if default and (self._hold_until is None or self._revert(generation, default, now)):
+                self._sent_key = None
             return
         key = self._key(state, config.offline_hold)
         if key is None:
             self._replace_connecting(generation, "Waiting for a flag")
             return
         if key == self._sent_key:
+            if default and self._hold_until is not None and now >= self._hold_until:
+                self._revert(generation, default, now)
             return
-        entity = dict(config.scenes).get(key)
+        entity = scenes.get(key)
         if not entity:
             if self._set_status(generation, HaStatus("idle", f"No scene for {key}")):
                 self._sent_key = key
@@ -145,6 +171,7 @@ class HomeAssistantOutput(Output):
             return
         if self._set_status(generation, HaStatus("ok", "", entity)):
             self._sent_key, self._failed_key = key, None
+            self._hold_until = now + _FLASH_HOLD[key] if key in _FLASH_HOLD else None
 
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():
