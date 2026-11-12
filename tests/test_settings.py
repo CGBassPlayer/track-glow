@@ -366,13 +366,14 @@ def test_scene_keys_and_labels():
     from track_glow.models import Flag
     from track_glow.settings import SCENE_KEYS, SCENE_LABELS
 
-    assert SCENE_KEYS == (*(f.key for f in Flag), "no_race", "offline", "blackout")
+    assert SCENE_KEYS == (*(f.key for f in Flag), "no_race", "offline", "blackout", "default")
     assert list(SCENE_LABELS) == list(SCENE_KEYS)
     assert SCENE_LABELS["white"] == "White"
     assert SCENE_LABELS["hot_track"] == "Hot Track"
     assert SCENE_LABELS["no_race"] == "No race"
     assert SCENE_LABELS["offline"] == "Feed offline"
     assert SCENE_LABELS["blackout"] == "Blackout"
+    assert SCENE_LABELS["default"] == "Default (resting)"
 
 
 @pytest.mark.parametrize(
