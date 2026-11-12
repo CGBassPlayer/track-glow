@@ -98,8 +98,9 @@ Track Glow can also trigger a Home Assistant scene on each change. Set it up in 
 Each scene is triggered once when the state changes (no flashing on the HA side) and retried every
 5 s if HA can't be reached. **Pause** leaves Home Assistant alone. With "hold the last flag", a feed
 outage doesn't trigger the offline scene. The token is stored only in the owner-only settings file:
-the web UI and API never send it back, and leaving the token field empty keeps the saved one. Clear
-the URL to turn Home Assistant off.
+the web UI and API never send it back, and leaving the token field empty keeps the saved one. If you
+change the URL you must enter the token again, so a new host can never receive the saved token.
+Clear the URL to turn Home Assistant off.
 
 The desktop launcher needs the `desktop` extra (PySide6). The repo's dev dependencies include
 it. A headless-only install doesn't.

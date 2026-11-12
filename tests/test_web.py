@@ -309,10 +309,21 @@ def test_settings_never_return_token(tmp_path, fake_engine):
     r = c.get("/api/settings")
     assert "s3cret-tkn" not in r.text
     assert r.json()["settings"]["ha_token_set"] is True
-    r = c.patch("/api/settings", json={"ha_url": "http://ha2:8123", "ha_token": ""})
+    r = c.patch("/api/settings", json={"ha_url": "http://ha:8123", "ha_token": ""})
     assert r.status_code == 200 and "s3cret-tkn" not in r.text
     assert svc.get().ha_token == "s3cret-tkn"
     assert "s3cret-tkn" not in c.get("/api/state").text
+
+
+def test_new_ha_url_without_token_is_rejected_and_keeps_saved_settings(tmp_path, fake_engine):
+    from track_glow.settings import Settings
+
+    c, svc = _ha_client(
+        tmp_path, fake_engine, Settings(ha_url="http://ha:8123", ha_token="s3cret-tkn")
+    )
+    r = c.patch("/api/settings", json={"ha_url": "http://attacker:8123"})
+    assert r.status_code == 422 and r.json()["field"] == "ha_token"
+    assert (svc.get().ha_url, svc.get().ha_token) == ("http://ha:8123", "s3cret-tkn")
 
 
 def test_ha_test_not_configured(tmp_path, fake_engine):
