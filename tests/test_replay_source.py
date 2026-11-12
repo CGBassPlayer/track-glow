@@ -23,21 +23,21 @@ def test_green_lap_progresses():
     src = ReplaySource(clock=fake_clock(12, 18))
     first, second = src.fetch(), src.fetch()
     assert (first.flag, first.lap) == (Flag.GREEN, 1)
-    assert (second.flag, second.lap) == (Flag.GREEN, 7)
+    assert (second.flag, second.lap) == (Flag.GREEN, 3)
 
 
-def test_loops_after_122s():
-    state = ReplaySource(clock=fake_clock(122)).fetch()
+def test_loops_after_269s():
+    state = ReplaySource(clock=fake_clock(269)).fetch()
     assert state.flag is Flag.COLD_TRACK
 
 
 def test_checkered_last_segment():
-    state = ReplaySource(clock=fake_clock(110)).fetch()
+    state = ReplaySource(clock=fake_clock(260)).fetch()
     assert (state.flag, state.lap, state.laps_to_go) == (Flag.CHECKERED, 80, 0)
 
 
 def test_static_fields():
-    state = ReplaySource(clock=fake_clock(40)).fetch()
+    state = ReplaySource(clock=fake_clock(85)).fetch()
     assert state.flag is Flag.YELLOW
     assert state.race_id == 1
     assert state.laps_in_race == 80
@@ -52,7 +52,9 @@ def test_replay_uses_given_series():
     assert state.series is Series.TRUCK
 
 
-def test_green_runs_one_lap_per_second():
-    src = ReplaySource(clock=fake_clock(20, 21, 50, 51))
-    laps = [src.fetch().lap for _ in range(4)]
-    assert laps[1] - laps[0] == 1 and laps[3] - laps[2] == 1
+def test_every_lap_takes_three_seconds():
+    src = ReplaySource(
+        clock=fake_clock(12, 14.9, 15, 93, 95.9, 96, 197, 199.9, 200, 254, 256.9, 257)
+    )
+    laps = [src.fetch().lap for _ in range(12)]
+    assert laps == [1, 1, 2, 28, 28, 29, 60, 60, 61, 79, 79, 80]
